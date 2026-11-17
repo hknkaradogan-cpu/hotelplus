@@ -167,10 +167,11 @@ form.f{display:flex;flex-direction:column;gap:10px}
 <script>
 /* ======================= AYARLAR (buradan değiştirilebilir) ======================= */
 const APP_ADI = "HotelPlus";
-const APP_VERSION = 7;   // her yayında 1 artırılır; telefonlarda "Güncelle" bunu karşılaştırır
+const APP_VERSION = 8;   // her yayında 1 artırılır; telefonlarda "Güncelle" bunu karşılaştırır
 const WEB_ADRES = "https://hknkaradogan-cpu.github.io/hotelplus/";
 const OTEL_ADI = "Otel";
-const DEPARTMANLAR = ["Yönetim","Resepsiyon","Kat Hizmetleri","Teknik Servis","Yiyecek & İçecek","Spa","Güvenlik","Muhasebe","Satış & Rezervasyon","İnsan Kaynakları","Animasyon","Diğer"];
+const VARSAYILAN_DEPARTMANLAR = ["Yönetim","Bilgi İşlem (IT)","İnsan Kaynakları","Resepsiyon","Kat Hizmetleri","Çamaşırhane","Teknik Servis","Mutfak","Restoran","Bulaşıkhane","Yiyecek & İçecek","Satın Alma","Spa","Güvenlik","Muhasebe","Satış & Rezervasyon","Animasyon","Diğer"];
+const IT = "Bilgi İşlem (IT)";
 const IK = "İnsan Kaynakları";
 const ROLLER = {gm:"Genel Müdür", mudur:"Departman Müdürü", sef:"Şef", personel:"Personel"};
 const ROL_SIRA = {gm:0, mudur:1, sef:2, personel:3};
@@ -180,9 +181,15 @@ const KIRMIZI_EK_ORAN = 1, KIRMIZI_EK_MIN_DK = 30;
 const DEPT_ANAHTAR = {
   "Yönetim":["genel müdür","genel mudur","müdür yardımcısı","otel müdürü","direktör","direktor"],
   "Resepsiyon":["resepsiyon","ön büro","on buro","front","konsiyerj","concierge","bellboy","bagaj","gece müdürü"],
-  "Kat Hizmetleri":["kat ","kat hiz","housekeeping","temizlik","oda görevlisi","çamaşır","camasir","laundry","meydancı","meydanci"],
+  "Kat Hizmetleri":["kat ","kat hiz","housekeeping","temizlik","oda görevlisi","meydancı","meydanci"],
+  "Çamaşırhane":["çamaşır","camasir","laundry","ütü"],
+  "Bulaşıkhane":["bulaşık","bulasik","steward"],
+  "Mutfak":["mutfak","aşçı","asci","şef aşçı","pastane","pasta","kasap","soğuk büfe"],
+  "Restoran":["restoran","garson","komi","maitre","şef garson"],
+  "Satın Alma":["satın alma","satin alma","satınalma","depo sorumlusu","ambar"],
+  "Bilgi İşlem (IT)":["bilgi işlem","bilgi islem","it ","bt ","sistem","network","yazılım"],
   "Teknik Servis":["teknik","bakım","bakim","elektrik","tesisat","mühendis","muhendis","teknisyen","bahçıvan","bahcivan","klima"],
-  "Yiyecek & İçecek":["mutfak","aşçı","asci","şef aşçı","garson","barmen","restoran","f&b","komi","bar ","pastane","bulaşık","bulasik","steward"],
+  "Yiyecek & İçecek":["barmen","f&b","bar ","yiyecek"],
   "Spa":["spa","masaj","terapist","hamam","güzellik","guzellik","fitness"],
   "Güvenlik":["güvenlik","guvenlik","security"],
   "Muhasebe":["muhasebe","finans","kasa","gelir"],
@@ -202,14 +209,23 @@ const GOREV_SABLONLARI = [
   {ad:"Havlu / çarşaf", tur:"istek", dept:"Kat Hizmetleri", dk:15},
   {ad:"Ekstra yastık / battaniye", tur:"istek", dept:"Kat Hizmetleri", dk:15},
   {ad:"Minibar yenileme", tur:"istek", dept:"Yiyecek & İçecek", dk:20},
-  {ad:"Oda servisi", tur:"istek", dept:"Yiyecek & İçecek", dk:30},
+  {ad:"Oda servisi", tur:"istek", dept:"Mutfak", dk:30},
+  {ad:"Ütü / çamaşır", tur:"istek", dept:"Çamaşırhane", dk:60},
+  {ad:"Masa hazırlığı / rezervasyon", tur:"istek", dept:"Restoran", dk:20},
+  {ad:"Bulaşık yetişmiyor", tur:"rutin", dept:"Bulaşıkhane", dk:30},
+  {ad:"Malzeme talebi", tur:"rutin", dept:"Satın Alma", dk:240},
+  {ad:"Mutfak cihaz arızası", tur:"ariza", dept:"Teknik Servis", dk:45},
+  {ad:"Bilgisayar / yazıcı / internet", tur:"ariza", dept:"Bilgi İşlem (IT)", dk:60},
   {ad:"Bagaj taşıma", tur:"istek", dept:"Resepsiyon", dk:10},
   {ad:"Uyandırma / taksi", tur:"istek", dept:"Resepsiyon", dk:10},
   {ad:"Spa / masaj randevusu", tur:"istek", dept:"Spa", dk:20},
   {ad:"Gürültü şikâyeti", tur:"istek", dept:"Güvenlik", dk:15},
   {ad:"Ortak alan temizliği", tur:"rutin", dept:"Kat Hizmetleri", dk:30}
 ];
-const KONUMLAR = ["Lobi","Restoran","Havuz","Spa","Otopark","Mescit","Toplantı salonu","Mutfak","Bahçe"];
+const VARSAYILAN_KONUMLAR = ["Lobi","Restoran","Mutfak","Bulaşıkhane","Çamaşırhane","Havuz","Spa","Otopark","Mescit","Toplantı salonu","Bahçe","Depo"];
+let AYAR = {departmanlar: VARSAYILAN_DEPARTMANLAR, konumlar: VARSAYILAN_KONUMLAR, otel: {}};
+const DEPARTMANLAR_GET = () => (AYAR.departmanlar && AYAR.departmanlar.length ? AYAR.departmanlar : VARSAYILAN_DEPARTMANLAR);
+const KONUMLAR_GET = () => (AYAR.konumlar && AYAR.konumlar.length ? AYAR.konumlar : VARSAYILAN_KONUMLAR);
 const HIZMETLER = [
   {id:"romantik", ad:"Romantik Akşam", fiyat:"Çift kişilik menü", renk:["#7a1f2b","#e5486b"]},
   {id:"aroma", ad:"Aromaterapi Masajı", fiyat:"50 dk", renk:["#2f6b3a","#8fd16b"]},
@@ -259,8 +275,8 @@ const ICONS = {
 const icon = (k, color) => `<svg viewBox="0 0 24 24" fill="none" stroke="${color||"currentColor"}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONS[k]}</svg>`;
 
 /* ---------------- Veri ---------------- */
-const COLLS = ["tasks","staff","reservations","gmsgs","chat","shifts","assets","energy","loyalty","rooms","guests","basvurular","sifreTalepleri","staffTel","guestTel","islemler","yedekler"];
-const MANAGER_ONLY = ["basvurular","sifreTalepleri","staffTel","yedekler"];
+const COLLS = ["duyurular","members","tasks","staff","reservations","gmsgs","chat","shifts","assets","energy","loyalty","rooms","guests","basvurular","sifreTalepleri","staffTel","guestTel","islemler","yedekler"];
+const MANAGER_ONLY = ["basvurular","sifreTalepleri","staffTel","yedekler","members"];
 const PRIV = {staff:"staffTel", guests:"guestTel"};   // telefon numaraları ayrı ve korumalı tutulur
 const raw = {staff:[], guests:[]}, telMap = {staffTel:{}, guestTel:{}};
 function mergePriv(){
@@ -314,7 +330,8 @@ const isAdmin = () => !!(authUser && authUser.email === "yonetici@" + EMAIL_DOMA
 const myRol = () => (mode === "demo" || isAdmin()) ? "gm" : ((me() && me().rol) || (member && member.rol) || "personel");
 const myDept = () => (me() && me().dept) || (member && member.dept) || "";
 const isGM = () => myRol() === "gm";
-const isHR = () => ["gm","mudur"].includes(myRol()) && myDept() === IK;
+const isHR = () => ["gm","mudur"].includes(myRol()) && (myDept() === IK || myDept() === IT);
+const canSettings = () => isGM() || (["gm","mudur","sef"].includes(myRol()) && myDept() === IT);
 const isManager = () => isGM() || myRol() === "mudur";
 const managesDept = d => isGM() || isHR() || (myRol() === "mudur" && myDept() === d);
 const canStaffAdmin = () => isGM() || isHR() || myRol() === "mudur";
@@ -425,7 +442,7 @@ function confirmSheet(msg, onYes, yesLabel){
   });
 }
 function fab(label, onclick){ const b=document.createElement("button"); b.className="fab"; b.innerHTML = icon("plus") + esc(label); b.onclick=onclick; document.body.appendChild(b); }
-const deptOptions = (sel, withAll) => (withAll?`<option value="">Tüm departmanlar</option>`:"") + DEPARTMANLAR.map(d=>`<option ${d===sel?"selected":""}>${esc(d)}</option>`).join("");
+const deptOptions = (sel, withAll) => (withAll?`<option value="">Tüm departmanlar</option>`:"") + DEPARTMANLAR_GET().map(d=>`<option ${d===sel?"selected":""}>${esc(d)}</option>`).join("");
 const rolOptions = (sel, allowHigh) => Object.entries(ROLLER).filter(([k]) => allowHigh || !["gm","mudur"].includes(k) || k===sel).map(([k,l])=>`<option value="${k}" ${k===sel?"selected":""}>${l}</option>`).join("");
 function copyText(t){ try { navigator.clipboard.writeText(t).then(()=>toast("Kopyalandı."), ()=>toast("Kopyalanamadı.")); } catch(e){ toast("Kopyalanamadı."); } }
 function smsLink(tel, body){ return `sms:+90${tel}?body=${encodeURIComponent(body)}`; }
@@ -456,7 +473,7 @@ async function init(){
     if (signingUp) return;
     authUser = u;
     unsubs.forEach(f => { try { f(); } catch(e){} }); unsubs = [];
-    COLLS.forEach(c => S[c] = []); raw.staff = []; raw.guests = []; telMap.staffTel = {}; telMap.guestTel = {}; member = null; meId = null; firstTasks = {}; firstChat = true; migrated = false; backupChecked = false;
+    COLLS.forEach(c => S[c] = []); firstDuyuru = true; raw.staff = []; raw.guests = []; telMap.staffTel = {}; telMap.guestTel = {}; member = null; meId = null; firstTasks = {}; firstChat = true; migrated = false; backupChecked = false;
     if (!u){ mode = "login"; renderLogin(); return; }
     try { const d = await FS.collection("members").doc(u.uid).get(); member = d.exists ? d.data() : null; } catch(e){ member = null; }
     if (!member && !isAdmin()){
@@ -492,9 +509,11 @@ function subscribe(){
     if (c === "guests") q = q.orderBy("olusturma","desc").limit(600);
     if (c === "islemler") q = q.orderBy("zaman","desc").limit(300);
     if (c === "yedekler") q = q.orderBy("zaman","desc").limit(60);
+    if (c === "duyurular") q = q.orderBy("zaman","desc").limit(50);
     unsubs.push(q.onSnapshot(snap => {
       const docs = snap.docs.map(d => ({id:d.id, ...d.data()}));
       if (c === "chat") onChatChanges(snap);
+      if (c === "duyurular") onDuyuruChanges(snap);
       if (c === "staff" || c === "guests"){ raw[c] = docs; mergePriv(); }
       else if (c === "staffTel" || c === "guestTel"){ telMap[c] = Object.fromEntries(docs.map(d => [d.id, d.tel])); mergePriv(); }
       else S[c] = docs;
@@ -505,6 +524,7 @@ function subscribe(){
     }, fail(c)));
   });
   subscribeTasks(fail("tasks"));
+  unsubs.push(DB.collection("ayarlar").doc("genel").onSnapshot(d => { if (d.exists) AYAR = {...AYAR, ...d.data()}; refresh(); }, () => {}));
 }
 function subscribeTasks(onErr){
   const sid = member && member.staffId;
@@ -655,7 +675,7 @@ function changePwSheet(forced){
       if ($("#cN").value.length < 8) return err("Şifre en az 8 karakter olmalı.");
       if ($("#cN").value === $("#cO").value) return err("Yeni şifre eskisinden farklı olmalı.");
       try { const u = firebase.auth().currentUser; await u.reauthenticateWithCredential(firebase.auth.EmailAuthProvider.credential(u.email, $("#cO").value)); await u.updatePassword($("#cN").value);
-        if (member && member.sifreDegistir){ try { await FS.collection("members").doc(u.uid).update({sifreDegistir:false}); member.sifreDegistir = false; } catch(x){} }
+        if (member && (member.sifreDegistir || member.geciciSifre)){ try { await FS.collection("members").doc(u.uid).update({sifreDegistir:false, geciciSifre:firebase.firestore.FieldValue.delete()}); member.sifreDegistir = false; } catch(x){} }
         closeSheet(); toast("Şifren değişti."); }
       catch(er){ err(authMsg(er)); } };
   }, {locked: !!forced});
@@ -673,7 +693,7 @@ async function giveAccess(st, pw){
   const sa = await secondaryAuth();
   const cred = await sa.createUserWithEmailAndPassword(email, pw);
   const uid = cred.user.uid; await sa.signOut();
-  await FS.collection("members").doc(uid).set({staffId:st.id, rol:st.rol||"personel", dept:st.dept, sifreDegistir:true});
+  await FS.collection("members").doc(uid).set({staffId:st.id, rol:st.rol||"personel", dept:st.dept, sifreDegistir:true, geciciSifre:pw});
   if (st.uid && st.uid !== uid){ try { await FS.collection("members").doc(st.uid).delete(); } catch(e){} }
   await FS.collection("staff").doc(st.id).update({uid, authEmail:email, durum:"aktif"});
   await FS.collection("logins").doc(st.tel).set({email, staffId:st.id});
@@ -744,6 +764,7 @@ VIEWS.home = {
       </div>
       <div class="tiles">
         ${T("gorevler","ops","var(--accent)","var(--accent-soft)","Görevler", mine)}
+        ${T("otel","star","var(--warn)","var(--warn-soft)","Otel & duyurular", unreadDuyuru())}
         ${T("odalar","bed","var(--info)","var(--info-soft)", S.rooms.length?`Odalar ${dolu}/${S.rooms.length}`:"Odalar", kirli)}
         ${T("misafir","guest","var(--ok)","var(--ok-soft)","Misafirler")}
         ${T("mesaj","msg","var(--ok)","var(--ok-soft)","Misafir mesajları", newMsg)}
@@ -756,6 +777,7 @@ VIEWS.home = {
         ${isManager()?T("sadakat","star","var(--warn)","var(--warn-soft)","Sadakat"):""}
         ${isManager()&&mode!=="demo"?T("yedek","box","var(--ok)","var(--ok-soft)","Yedekler"):""}
         ${isGM()&&mode!=="demo"?T("kayit","ops","var(--muted)","var(--bg)","İşlem kaydı"):""}
+        ${canSettings()?T("ayarlar","box","var(--accent)","var(--accent-soft)","Departman & ayarlar"):""}
       </div>
       <div class="legend"><span><i style="background:var(--ok)"></i>Süresi içinde</span><span><i style="background:var(--warn)"></i>Süre doldu → departman müdürü</span><span><i style="background:var(--bad)"></i>Çok gecikti → genel müdür</span></div>`;
   },
@@ -775,22 +797,26 @@ function taskCard(t){
   if (t.durum === "open" && (t.atanan === meId || (!t.atanan && (sameDept || canManage)))) acts.push(`<button class="btn ok sm" data-act="start" data-id="${esc(t.id)}">Başlat</button>`);
   if (t.durum !== "done" && (t.atanan === meId || canManage || (sameDept && !t.atanan))) acts.push(`<button class="btn pri sm" data-act="done" data-id="${esc(t.id)}">Bitir</button>`);
   if (t.durum !== "done" && (canManage || sameDept)) acts.push(`<button class="btn sm" data-act="assign" data-id="${esc(t.id)}">Ata</button>`);
+  if (mode !== "demo" && (t.atanan === meId || sameDept || canManage || t.olusturan === meId)) acts.push(`<button class="btn sm" data-act="ek" data-id="${esc(t.id)}">+ Foto/Video</button>`);
   if (canManage) acts.push(`<span style="flex:1"></span><button class="btn sm danger" data-act="del" data-id="${esc(t.id)}">Sil</button>`);
   return `<article class="card task lv-${lv}">
     <div class="t1"><div><div class="ttl">${esc(t.ad)}</div><div class="meta"><span>${esc(t.konum||"")}</span><span>#${esc(t.no||"")}</span></div></div><span class="chip ${lc}">${ll}</span></div>
     <div class="meta"><span>Departman: <b>${esc(t.dept)}</b></span><span>Atanan: <b>${t.atanan?esc(nameOf(t.atanan)):'<span class="late">Atanmadı</span>'}</b></span></div>
     <div class="meta"><span>${t.durum==="started"?"Başladı":"Açık"} · ${fmtDT(t.talep)} · süre ${dur(t.dk)}</span><span>${timeText(t)}</span><span>Gönderen: ${esc(nameOf(t.olusturan))}</span></div>
     ${t.aciklama?`<div style="font-size:13px">${esc(t.aciklama)}</div>`:""}
+    ${(t.ekler||[]).length?`<div class="acts">${t.ekler.map(x=>`<button class="btn sm" data-ek="${esc(x.id)}">${x.tur&&x.tur.startsWith("video")?"🎬 Video":"🖼 Fotoğraf"}</button>`).join("")}</div>`:""}
     ${acts.length?`<div class="acts">${acts.join("")}</div>`:""}
   </article>`;
 }
 function bindTaskActions(){
+  document.querySelectorAll("[data-ek]").forEach(b => b.onclick = () => openAttachment(b.dataset.ek));
   document.querySelectorAll("[data-act]").forEach(b => b.onclick = () => {
     const t = S.tasks.find(x => x.id === b.dataset.id); if (!t) return;
     const a = b.dataset.act;
     if (a === "start") store.upd("tasks", t.id, {durum:"started", baslama:Date.now(), atanan: t.atanan || meId || ""});
     if (a === "done") finishTask(t);
     if (a === "assign") assignSheet(t);
+    if (a === "ek") addAttachSheet(t);
     if (a === "del") confirmSheet("Bu görev silinsin mi?", () => store.del("tasks", t.id), "Sil");
   });
 }
@@ -847,12 +873,13 @@ VIEWS.yeni = {
       <div class="fld"><label>Ne gönderiyorsun?</label><div class="seg" id="turSeg">${[["ariza","Arıza"],["istek","Misafir isteği"],["rutin","Diğer iş"]].map(([v,l])=>`<button type="button" data-v="${v}" class="${v===newTur?"on":""}">${l}</button>`).join("")}</div></div>
       <div class="fld"><label for="fGorev">Konu *</label><input id="fGorev" list="gorevler" placeholder="Örn. Klima arızası" autocomplete="off" required><datalist id="gorevler"></datalist><span class="hint">Listeden seçersen departman ve süre kendiliğinden gelir.</span></div>
       <div class="row2"><div class="fld"><label for="fDept">Departman *</label><select id="fDept">${deptOptions("Teknik Servis")}</select></div>
-        <div class="fld"><label for="fKonum">Oda / yer *</label><input id="fKonum" list="konumlar" inputmode="text" placeholder="1104 ya da Lobi" required><datalist id="konumlar">${S.rooms.map(r=>`<option value="Oda ${esc(r.no)}">`).join("")}${KONUMLAR.map(k=>`<option value="${esc(k)}">`).join("")}</datalist></div></div>
+        <div class="fld"><label for="fKonum">Oda / yer *</label><input id="fKonum" list="konumlar" inputmode="text" placeholder="1104 ya da Lobi" required><datalist id="konumlar">${S.rooms.map(r=>`<option value="Oda ${esc(r.no)}">`).join("")}${KONUMLAR_GET().map(k=>`<option value="${esc(k)}">`).join("")}</datalist></div></div>
       <div class="fld"><label>Ne kadar sürede bitmeli?</label><div class="seg" id="dkSeg">${[15,30,45,60,90,120].map(v=>`<button type="button" data-v="${v}" class="${v===newDk?"on":""}">${v<60?v+" dk":(v/60)+" sa"}</button>`).join("")}</div>
         <span class="hint" id="eskHint"></span></div>
       <div class="fld"><label for="fKisi">Kime?</label><select id="fKisi"></select></div>
       <div class="fld"><label for="fAcik">Açıklama</label><textarea id="fAcik" placeholder="Kısa bilgi (isteğe bağlı)"></textarea></div>
-      <button class="btn go block" type="submit">Gönder</button>
+      ${attachPicker()}
+      <button class="btn go block" type="submit" id="tGo">Gönder</button>
     </form>`;
   },
   after(){
@@ -869,14 +896,20 @@ VIEWS.yeni = {
       else { const d = guessDeptFromText($("#fGorev").value); if (d) { $("#fDept").value = d; fillStaff(); } }
     });
     if (prefill){ if (prefill.konum) $("#fKonum").value = prefill.konum; if (prefill.gorev) $("#fGorev").value = prefill.gorev; if (prefill.aciklama) $("#fAcik").value = prefill.aciklama; if (prefill.dept){ $("#fDept").value = prefill.dept; fillStaff(); } if (prefill.tur){ newTur = prefill.tur; } prefill = null; }
+    bindAttachPicker();
     $("#tf").onsubmit = async e => {
       e.preventDefault();
       const ad = $("#fGorev").value.trim(); let konum = $("#fKonum").value.trim();
       if (!ad || !konum){ toast("Konu ve oda/yer zorunlu."); return; }
+      const tid = "t" + uid8();
+      const gb = $("#tGo"); gb.disabled = true;
+      let ekler = [];
+      try { ekler = await uploadPending("task:" + tid, n => gb.textContent = `Ekler yükleniyor ${n}…`); } catch(er){ gb.disabled = false; gb.textContent = "Gönder"; toast("Ek yüklenemedi. İnterneti kontrol edip tekrar dene."); return; }
+      gb.textContent = "Gönderiliyor…";
       if (/^\d{3,5}$/.test(konum)) konum = "Oda " + konum;
       const no = S.tasks.reduce((m,t)=>Math.max(m, +t.no||0), 1000) + 1;
-      const ok = await store.add("tasks", {no, ad, tur:newTur, konum, oda:(roomFromText(konum)||{}).no||"", aciklama:$("#fAcik").value.trim(), atanan:$("#fKisi").value, dept:$("#fDept").value, dk:newDk, talep:Date.now(), olusturan:meId||"", durum:"open"});
-      if (ok === false) return;
+      const ok = await store.set("tasks", tid, {ekler, no, ad, tur:newTur, konum, oda:(roomFromText(konum)||{}).no||"", aciklama:$("#fAcik").value.trim(), atanan:$("#fKisi").value, dept:$("#fDept").value, dk:newDk, talep:Date.now(), olusturan:meId||"", durum:"open"});
+      if (ok === false){ gb.disabled = false; gb.textContent = "Gönder"; return; }
       if (newTur === "ariza"){ const r = roomFromText(konum); if (r && r.durum !== "dolu") store.upd("rooms", r.id, {durum:"ariza"}); }
       toast(`Görev ${no} ${$("#fDept").value} departmanına gönderildi.`); taskTab = "acik"; taskLv = ""; go("gorevler");
     };
@@ -935,7 +968,7 @@ VIEWS.personel = {
     if (apps.length) html += `<h2>Üyelik başvuruları (${apps.length})</h2>` + apps.map(b => `<div class="card"><div class="li"><div class="main"><b>${esc(b.ad)}</b><span>${esc(b.dept)} · ${esc(b.unvan||"")} · ${esc(fmtTel(b.tel))}</span></div></div><div class="acts"><button class="btn ok sm" data-ap="${esc(b.id)}">Onayla</button><button class="btn sm danger" data-rj="${esc(b.id)}">Reddet</button></div></div>`).join("");
     if (resets.length) html += `<h2>Şifre talepleri (${resets.length})</h2>` + resets.map(r => { const s = S.staff.find(x=>x.tel===r.tel); return `<div class="card li"><div class="main"><b>${esc(s.ad)}</b><span>${esc(fmtTel(r.tel))} · ${fmtDT(r.zaman)}</span></div><button class="btn go sm" data-rs="${esc(s.id)}">Yeni şifre ver</button></div>`; }).join("");
     const list = S.staff.filter(s => !staffDept || s.dept === staffDept);
-    const depts = [...new Set(DEPARTMANLAR.concat(list.map(s=>s.dept)))].filter(d => list.some(s=>s.dept===d));
+    const depts = [...new Set(DEPARTMANLAR_GET().concat(list.map(s=>s.dept)))].filter(d => list.some(s=>s.dept===d));
     const st = s => s.durum === "pasif" ? '<span class="chip bad">Pasif</span>' : s.uid ? '<span class="chip ok">Aktif</span>' : '<span class="chip mute">Hesap yok</span>';
     html += list.length ? depts.map(d => `<h2>${esc(d)} (${list.filter(s=>s.dept===d).length})</h2>` + list.filter(s=>s.dept===d).sort(rolSort).map(s => `<button class="card li${staffSel&&staffSel.has(s.id)?" sel":""}" style="text-align:left;cursor:pointer" data-st="${esc(s.id)}"><div class="main"><b>${esc(s.ad)}</b><span>${esc(ROLLER[s.rol]||"Personel")}${s.unvan?" · "+esc(s.unvan):""}${s.tel?" · "+esc(fmtTel(s.tel)):""}</span></div>${st(s)}</button>`).join("")).join("")
       : `<div class="empty">Personel yok. PDF'den yükle ya da tek tek ekle.</div>`;
@@ -969,6 +1002,7 @@ function staffSheet(id){
     <div class="row2"><div class="fld"><label for="eT">Telefon</label><input id="eT" type="tel" inputmode="tel" value="${esc(s&&s.tel?fmtTel(s.tel):"")}" placeholder="05xx xxx xx xx"></div><div class="fld"><label for="eU">Unvan</label><input id="eU" value="${esc(s?s.unvan||"":"")}" placeholder="Örn. Kat görevlisi"></div></div>
     <div class="row2"><div class="fld"><label for="eD">Departman</label><select id="eD" ${high?"":"disabled"}>${deptOptions(deptSel)}</select></div><div class="fld"><label for="eR">Rütbe</label><select id="eR">${rolOptions(s?s.rol:"personel", high)}</select></div></div>
     ${canEditThis?`<button class="btn go block">${s?"Kaydet":"Ekle"}</button>`:`<div class="hint">Bu kişiyi sadece genel müdür ya da İK düzenleyebilir.</div>`}</form>
+    ${s && s.uid && mode!=="demo" && s.durum!=="pasif" ? (() => { const m = S.members.find(x => x.id === s.uid); return m && m.geciciSifre ? `<div class="banner" style="background:var(--info-soft)">Geçici şifresi: <b class="num">${esc(m.geciciSifre)}</b> · henüz kendi şifresini belirlemedi.</div>` : `<div class="hint">Kendi şifresini belirledi. Unuttuysa "Şifre sıfırla" ile yenisini ver.</div>`; })() : ""}
     ${s && canEditThis && mode!=="demo" ? `<div class="list">
       ${s.durum==="pasif" ? `<button class="btn ok block" id="eAct">Tekrar aktif et (yeni şifre ver)</button>`
         : s.uid ? `<button class="btn block" id="eRst">Şifre sıfırla</button><button class="btn danger block" id="eOff">İşten ayrıldı · girişini kapat</button>`
@@ -981,7 +1015,7 @@ function staffSheet(id){
       const data = {ad:$("#eA").value.trim(), tel, unvan:$("#eU").value.trim(), dept:$("#eD").value, rol:$("#eR").value};
       if (s){
         await store.upd("staff", s.id, data);
-        if (s.uid && s.durum !== "pasif" && (s.rol !== data.rol || s.dept !== data.dept) && FS) { try { await FS.collection("members").doc(s.uid).set({staffId:s.id, rol:data.rol, dept:data.dept}); } catch(er){ handleErr(er); } }
+        if (s.uid && s.durum !== "pasif" && (s.rol !== data.rol || s.dept !== data.dept) && FS) { try { await FS.collection("members").doc(s.uid).set({staffId:s.id, rol:data.rol, dept:data.dept}, {merge:true}); } catch(er){ handleErr(er); } }
         if (s.uid && s.tel && s.tel !== tel && FS && s.durum !== "pasif"){ try { await FS.collection("logins").doc(s.tel).delete(); if (tel) await FS.collection("logins").doc(tel).set({email:s.authEmail, staffId:s.id}); } catch(er){} }
         toast("Kaydedildi.");
       } else { await store.add("staff", {...data, durum:"aktif"}); toast(`${data.ad} eklendi.`); }
@@ -1300,8 +1334,156 @@ VIEWS.sadakat = {
 };
 
 
+
+/* ======================= FOTOĞRAF / VİDEO EKLERİ ======================= */
+const MAX_VIDEO_MB = 12, PARCA = 700000;
+let pendingFiles = [];
+function attachPicker(){
+  return `<div class="fld"><label>Fotoğraf / video</label>
+    <div class="seg"><button type="button" id="apPhoto">📷 Fotoğraf çek</button><button type="button" id="apVideo">🎬 Video çek</button><button type="button" id="apGal">🖼 Galeriden</button></div>
+    <input type="file" id="inPhoto" accept="image/*" capture="environment" hidden><input type="file" id="inVideo" accept="video/*" capture="environment" hidden><input type="file" id="inGal" accept="image/*,video/*" multiple hidden>
+    <div id="apList" class="acts"></div><span class="hint">Video en fazla ${MAX_VIDEO_MB} MB (yaklaşık 20-30 saniye).</span></div>`;
+}
+function renderPending(){
+  const el = $("#apList"); if (!el) return;
+  el.innerHTML = pendingFiles.map((f,i) => `<span class="chip info">${f.type.startsWith("video")?"🎬":"🖼"} ${esc(f.name.slice(0,18))} <button type="button" data-rm="${i}" style="border:0;background:none;color:inherit;cursor:pointer;font-weight:700" aria-label="Kaldır">✕</button></span>`).join("");
+  el.querySelectorAll("[data-rm]").forEach(b => b.onclick = () => { pendingFiles.splice(+b.dataset.rm, 1); renderPending(); });
+}
+function bindAttachPicker(){
+  pendingFiles = [];
+  const add = files => { for (const f of files){ if (f.type.startsWith("video") && f.size > MAX_VIDEO_MB*1048576){ toast(`Video çok büyük (${Math.round(f.size/1048576)} MB). En fazla ${MAX_VIDEO_MB} MB.`); continue; } if (pendingFiles.length >= 6){ toast("En fazla 6 ek."); break; } pendingFiles.push(f); } renderPending(); };
+  [["apPhoto","inPhoto"],["apVideo","inVideo"],["apGal","inGal"]].forEach(([b,i]) => { $("#"+b).onclick = () => $("#"+i).click(); $("#"+i).onchange = e => { add([...e.target.files]); e.target.value = ""; }; });
+}
+function readDataUrl(blob){ return new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = rej; r.readAsDataURL(blob); }); }
+async function compressImage(file){
+  try {
+    const url = URL.createObjectURL(file);
+    const img = await new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = url; });
+    const sc = Math.min(1, 1600 / Math.max(img.naturalWidth, img.naturalHeight));
+    const cv = document.createElement("canvas"); cv.width = Math.round(img.naturalWidth*sc); cv.height = Math.round(img.naturalHeight*sc);
+    cv.getContext("2d").drawImage(img, 0, 0, cv.width, cv.height); URL.revokeObjectURL(url);
+    return {dataUrl: cv.toDataURL("image/jpeg", 0.75), type:"image/jpeg"};
+  } catch(e){ return {dataUrl: await readDataUrl(file), type:file.type||"image/jpeg"}; }
+}
+async function uploadFile(file, bag){
+  if (!DB) throw new Error("demo");
+  const isImg = (file.type||"").startsWith("image");
+  const {dataUrl, type} = isImg ? await compressImage(file) : {dataUrl: await readDataUrl(file), type: file.type||"video/mp4"};
+  const b64 = dataUrl.slice(dataUrl.indexOf(",")+1);
+  const id = "f" + uid8(), n = Math.ceil(b64.length / PARCA);
+  for (let i=0; i<n; i++) await DB.collection("dosyalar").doc(id).collection("parca").doc(String(i).padStart(3,"0")).set({i, d:b64.slice(i*PARCA, (i+1)*PARCA)});
+  await DB.collection("dosyalar").doc(id).set({ad:file.name||"dosya", tur:type, boyut:Math.round(b64.length*0.75), parca:n, zaman:Date.now(), kim:meId||"", bag});
+  return {id, tur:type, ad:file.name||""};
+}
+async function uploadPending(bag, onProgress){
+  const out = [];
+  for (let i=0; i<pendingFiles.length; i++){ onProgress && onProgress(`${i+1}/${pendingFiles.length}`); out.push(await uploadFile(pendingFiles[i], bag)); }
+  pendingFiles = []; return out;
+}
+const fileCache = {};
+async function loadFile(id){
+  if (fileCache[id]) return fileCache[id];
+  const meta = await DB.collection("dosyalar").doc(id).get(); if (!meta.exists) throw new Error("yok");
+  const parts = await DB.collection("dosyalar").doc(id).collection("parca").get();
+  const b64 = parts.docs.map(d => d.data()).sort((a,b)=>a.i-b.i).map(x=>x.d).join("");
+  const bin = atob(b64), arr = new Uint8Array(bin.length); for (let i=0;i<bin.length;i++) arr[i] = bin.charCodeAt(i);
+  const m = meta.data(); const url = URL.createObjectURL(new Blob([arr], {type:m.tur}));
+  return fileCache[id] = {url, tur:m.tur, ad:m.ad};
+}
+async function openAttachment(id){
+  sheet("Ek", `<div id="ekBox" class="empty">Yükleniyor…</div>`);
+  try { const f = await loadFile(id); const box = $("#ekBox"); if (!box) return;
+    box.className = ""; box.innerHTML = f.tur.startsWith("video") ? `<video src="${f.url}" controls playsinline style="width:100%;border-radius:10px;max-height:70vh"></video>` : `<img src="${f.url}" alt="Ek fotoğraf" style="width:100%;border-radius:10px">`;
+  } catch(e){ const box = $("#ekBox"); if (box) box.textContent = "Ek açılamadı."; }
+}
+function addAttachSheet(t){
+  sheet(`Ek ekle: ${esc(t.ad)}`, `<form class="f" id="aeF">${attachPicker()}<button class="btn go block" id="aeGo">Ekle</button></form>`, () => {
+    bindAttachPicker();
+    $("#aeF").onsubmit = async e => { e.preventDefault(); if (!pendingFiles.length){ toast("Önce fotoğraf ya da video seç."); return; } const b = $("#aeGo"); b.disabled = true;
+      try { const ek = await uploadPending("task:" + t.id, n => b.textContent = `Yükleniyor ${n}…`); await store.upd("tasks", t.id, {ekler:(t.ekler||[]).concat(ek)}); closeSheet(); toast("Eklendi."); }
+      catch(er){ b.disabled = false; b.textContent = "Ekle"; toast("Yüklenemedi, tekrar dene."); } };
+  });
+}
+
+/* ======================= OTEL BİLGİLERİ & DUYURULAR ======================= */
+let duyuruSeen = 0, firstDuyuru = true; try { duyuruSeen = +localStorage.getItem("hp_duyuru_seen") || 0; } catch(e){}
+const unreadDuyuru = () => S.duyurular.filter(d => d.zaman > duyuruSeen && d.kim !== meId).length;
+function onDuyuruChanges(snap){
+  if (firstDuyuru){ firstDuyuru = false; return; }
+  snap.docChanges().forEach(ch => { if (ch.type !== "added" || (ch.doc.metadata && ch.doc.metadata.hasPendingWrites)) return; const d = ch.doc.data(); if (d.kim !== meId) notifyNow("Duyuru: " + (d.baslik||""), String(d.metin||"").slice(0,120)); });
+}
+VIEWS.otel = {
+  title: "Otel & duyurular",
+  shell(){ return isManager() ? `<button class="btn go block" id="dNew">Duyuru yayınla</button>` : ""; },
+  after(){ duyuruSeen = Date.now(); try { localStorage.setItem("hp_duyuru_seen", String(duyuruSeen)); } catch(e){} if ($("#dNew")) $("#dNew").onclick = duyuruSheet; },
+  live(){
+    const o = AYAR.otel || {};
+    const plans = o.planlar || [];
+    const info = `<div class="card"><b style="font:600 16px var(--display)">${esc(o.ad || OTEL_ADI)}</b>
+      ${o.aciklama?`<div style="white-space:pre-wrap">${esc(o.aciklama)}</div>`:`<div class="muted">${canSettings()?"Otel açıklaması eklenmedi. Departman & ayarlar ekranından ekleyebilirsin.":"Otel bilgisi henüz eklenmedi."}</div>`}
+      ${o.adres?`<div class="meta"><span>📍 ${esc(o.adres)}</span></div><a class="btn sm" style="align-self:flex-start;text-decoration:none" href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(o.adres)}">Haritada aç</a>`:""}
+      ${o.telefon?`<div class="meta"><span>☎ ${esc(o.telefon)}</span></div>`:""}
+      ${plans.length?`<div class="acts">${plans.map((x,i)=>`<button class="btn sm" data-ek="${esc(x.id)}">🗺 ${esc(x.ad||("Plan "+(i+1)))}</button>`).join("")}</div>`:""}</div>`;
+    const ds = S.duyurular.length ? S.duyurular.map(d => `<div class="card"><div class="t1 li"><div class="main"><b>${esc(d.baslik)}</b><span>${esc(d.kimAd||"")} · ${fmtDT(d.zaman)}${d.dept?" · "+esc(d.dept):""}</span></div>${isManager()?`<button class="btn sm danger" data-dd="${esc(d.id)}">Sil</button>`:""}</div><div style="white-space:pre-wrap">${esc(d.metin)}</div></div>`).join("") : `<div class="empty">Henüz duyuru yok.</div>`;
+    return info + `<h2>Duyurular</h2>` + ds;
+  },
+  bind(){
+    document.querySelectorAll("[data-ek]").forEach(b => b.onclick = () => openAttachment(b.dataset.ek));
+    document.querySelectorAll("[data-dd]").forEach(b => b.onclick = () => confirmSheet("Duyuru silinsin mi?", () => store.del("duyurular", b.dataset.dd), "Sil"));
+  }
+};
+function duyuruSheet(){
+  sheet("Duyuru yayınla", `<form class="f" id="duF"><div class="fld"><label for="duB">Başlık *</label><input id="duB" required></div><div class="fld"><label for="duM">Duyuru *</label><textarea id="duM" required></textarea></div><button class="btn go block">Yayınla</button></form>`, () => {
+    $("#duF").onsubmit = async e => { e.preventDefault(); await store.add("duyurular", {baslik:$("#duB").value.trim(), metin:$("#duM").value.trim(), zaman:Date.now(), kim:meId||"", kimAd: me()?me().ad:"Genel Müdür"}); closeSheet(); toast("Duyuru herkese gönderildi."); };
+  });
+}
+
+/* ======================= DEPARTMAN & AYARLAR (GM ve Bilgi İşlem) ======================= */
+async function saveAyar(patch){
+  AYAR = {...AYAR, ...patch};
+  if (DB){ try { await DB.collection("ayarlar").doc("genel").set(patch, {merge:true}); logOp("değiştirdi", "ayarlar", "genel", {ad:Object.keys(patch).join(", ")}); } catch(e){ handleErr(e); return false; } }
+  refresh(); return true;
+}
+VIEWS.ayarlar = {
+  title: "Departman & ayarlar", allow: () => canSettings(),
+  shell(){
+    const o = AYAR.otel || {};
+    return `<form class="card f" id="otF"><b>Otel bilgileri</b>
+      <div class="fld"><label for="oA">Otel adı</label><input id="oA" value="${esc(o.ad||"")}"></div>
+      <div class="fld"><label for="oD">Açıklama (herkes görür)</label><textarea id="oD" placeholder="Otelin tanıtımı, kurallar, önemli bilgiler">${esc(o.aciklama||"")}</textarea></div>
+      <div class="row2"><div class="fld"><label for="oR">Adres / konum</label><input id="oR" value="${esc(o.adres||"")}"></div><div class="fld"><label for="oT">Telefon</label><input id="oT" value="${esc(o.telefon||"")}"></div></div>
+      <button class="btn go block">Otel bilgilerini kaydet</button></form>
+      <div class="card f"><b>Otel planı / haritası</b><div class="hint">Otelin kat planı ya da yerleşim resmini ekle; herkes "Otel & duyurular" ekranında görür.</div>
+      <div id="planList" class="acts"></div>${attachPicker()}<button class="btn block" id="planGo">Planı yükle</button></div>`;
+  },
+  after(){
+    $("#otF").onsubmit = async e => { e.preventDefault(); if (await saveAyar({otel:{...(AYAR.otel||{}), ad:$("#oA").value.trim(), aciklama:$("#oD").value.trim(), adres:$("#oR").value.trim(), telefon:$("#oT").value.trim()}})) toast("Kaydedildi."); };
+    bindAttachPicker();
+    $("#planGo").onclick = async () => { if (!pendingFiles.length){ toast("Önce resmi seç."); return; } const b = $("#planGo"); b.disabled = true;
+      try { const ek = await uploadPending("otel", n => b.textContent = `Yükleniyor ${n}…`); await saveAyar({otel:{...(AYAR.otel||{}), planlar:((AYAR.otel||{}).planlar||[]).concat(ek.map(x=>({id:x.id, ad:x.ad})))}}); toast("Plan eklendi."); }
+      catch(er){ toast("Yüklenemedi."); } b.disabled = false; b.textContent = "Planı yükle"; };
+  },
+  live(){
+    const deps = DEPARTMANLAR_GET(), kon = KONUMLAR_GET();
+    const plans = (AYAR.otel||{}).planlar || [];
+    setTimeout(() => { const pl = $("#planList"); if (pl){ pl.innerHTML = plans.map((x,i)=>`<span class="chip info">🗺 ${esc(x.ad||"Plan "+(i+1))} <button type="button" data-pd2="${i}" style="border:0;background:none;color:inherit;cursor:pointer;font-weight:700" aria-label="Sil">✕</button></span>`).join(""); pl.querySelectorAll("[data-pd2]").forEach(b => b.onclick = () => confirmSheet("Bu plan kaldırılsın mı?", () => { const l = plans.slice(); l.splice(+b.dataset.pd2,1); saveAyar({otel:{...(AYAR.otel||{}), planlar:l}}); }, "Kaldır")); } }, 0);
+    return `<div class="card f"><b>Departmanlar (${deps.length})</b><div class="hint">Yeni departman ekle ya da boş olanı kaldır. Görev gönderirken ve personel eklerken bu liste kullanılır.</div>
+      <div class="acts">${deps.map(d => { const n = S.staff.filter(s=>s.dept===d).length; return `<span class="chip ${n?"mute":"info"}">${esc(d)} · ${n} ${!n && ![IK,IT,"Yönetim"].includes(d)?`<button type="button" data-dx="${esc(d)}" style="border:0;background:none;color:inherit;cursor:pointer;font-weight:700" aria-label="Kaldır">✕</button>`:""}</span>`; }).join("")}</div>
+      <div class="row2"><input id="dAdd" placeholder="Yeni departman adı" style="padding:9px 11px;border:1px solid var(--line);border-radius:10px;background:var(--surface)"><button type="button" class="btn go" id="dAddB">Ekle</button></div></div>
+      <div class="card f"><b>Yerler / alanlar (${kon.length})</b><div class="hint">Görev gönderirken "Oda / yer" kısmında çıkar (odalar ayrıca eklenir).</div>
+      <div class="acts">${kon.map(k => `<span class="chip mute">${esc(k)} <button type="button" data-kx="${esc(k)}" style="border:0;background:none;color:inherit;cursor:pointer;font-weight:700" aria-label="Kaldır">✕</button></span>`).join("")}</div>
+      <div class="row2"><input id="kAdd" placeholder="Örn. Teras bar" style="padding:9px 11px;border:1px solid var(--line);border-radius:10px;background:var(--surface)"><button type="button" class="btn go" id="kAddB">Ekle</button></div></div>`;
+  },
+  bind(){
+    $("#dAddB").onclick = () => { const v = $("#dAdd").value.trim(); if (!v) return; if (DEPARTMANLAR_GET().some(d => trLower(d) === trLower(v))) return toast("Bu departman zaten var."); saveAyar({departmanlar: DEPARTMANLAR_GET().concat(v)}).then(ok => ok && toast(`${v} eklendi.`)); };
+    document.querySelectorAll("[data-dx]").forEach(b => b.onclick = () => confirmSheet(`${b.dataset.dx} departmanı kaldırılsın mı?`, () => saveAyar({departmanlar: DEPARTMANLAR_GET().filter(d => d !== b.dataset.dx)}), "Kaldır"));
+    $("#kAddB").onclick = () => { const v = $("#kAdd").value.trim(); if (!v) return; if (KONUMLAR_GET().some(d => trLower(d) === trLower(v))) return toast("Bu yer zaten var."); saveAyar({konumlar: KONUMLAR_GET().concat(v)}); };
+    document.querySelectorAll("[data-kx]").forEach(b => b.onclick = () => saveAyar({konumlar: KONUMLAR_GET().filter(k => k !== b.dataset.kx)}));
+  }
+};
+
 /* ======================= YEDEKLER ======================= */
-const YEDEK_KOLL = ["staff","staffTel","tasks","rooms","guests","guestTel","reservations","gmsgs","assets","energy","loyalty","shifts","chat"];
+const YEDEK_KOLL = ["staff","staffTel","tasks","rooms","guests","guestTel","reservations","gmsgs","assets","energy","loyalty","shifts","chat","duyurular","ayarlar"];
 const OTO_YEDEK_SAKLA = 30;
 let backupBusy = false;
 async function collectAll(){
@@ -1431,7 +1613,7 @@ async function readPdf(file){
 }
 function guessDept(line){
   const l = " " + trLower(line) + " ";
-  for (const d of DEPARTMANLAR) if (l.includes(" " + trLower(d) + " ") || l.includes(trLower(d))) if (d !== "Diğer") return d;
+  for (const d of DEPARTMANLAR_GET()) if (l.includes(" " + trLower(d) + " ") || l.includes(trLower(d))) if (d !== "Diğer") return d;
   for (const [d, keys] of Object.entries(DEPT_ANAHTAR)) if (keys.some(k=>l.includes(k))) return d;
   return "Diğer";
 }
@@ -1447,7 +1629,7 @@ function parseStaff(text){
     const rest = (tm ? line.replace(tm[0], " ") : line).replace(/^\s*\d+[.)-]?\s*/, "");
     const parts = rest.split(/\t|;|,|\s[-–|]\s|\s{2,}/).map(x=>x.trim()).filter(Boolean);
     const ad = (parts[0]||"").replace(/\s+/g," ");
-    const unvan = parts.slice(1).filter(p => !DEPARTMANLAR.some(d=>trLower(d)===trLower(p))).join(", ");
+    const unvan = parts.slice(1).filter(p => !DEPARTMANLAR_GET().some(d=>trLower(d)===trLower(p))).join(", ");
     return {ad, unvan, tel: telOk(tel)?tel:"", dept: guessDept(line), rol: guessRol(unvan || line)};
   }).filter(x=>x.ad && x.ad.split(" ").length<=5 && !/^\d+$/.test(x.ad));
 }
