@@ -167,7 +167,7 @@ form.f{display:flex;flex-direction:column;gap:10px}
 <script>
 /* ======================= AYARLAR (buradan değiştirilebilir) ======================= */
 const APP_ADI = "HotelPlus";
-const APP_VERSION = 6;   // her yayında 1 artırılır; telefonlarda "Güncelle" bunu karşılaştırır
+const APP_VERSION = 7;   // her yayında 1 artırılır; telefonlarda "Güncelle" bunu karşılaştırır
 const WEB_ADRES = "https://hknkaradogan-cpu.github.io/hotelplus/";
 const OTEL_ADI = "Otel";
 const DEPARTMANLAR = ["Yönetim","Resepsiyon","Kat Hizmetleri","Teknik Servis","Yiyecek & İçecek","Spa","Güvenlik","Muhasebe","Satış & Rezervasyon","İnsan Kaynakları","Animasyon","Diğer"];
@@ -259,8 +259,26 @@ const ICONS = {
 const icon = (k, color) => `<svg viewBox="0 0 24 24" fill="none" stroke="${color||"currentColor"}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONS[k]}</svg>`;
 
 /* ---------------- Veri ---------------- */
-const COLLS = ["tasks","staff","reservations","gmsgs","chat","shifts","assets","energy","loyalty","rooms","guests","basvurular","sifreTalepleri"];
-const MANAGER_ONLY = ["basvurular","sifreTalepleri"];
+const COLLS = ["tasks","staff","reservations","gmsgs","chat","shifts","assets","energy","loyalty","rooms","guests","basvurular","sifreTalepleri","staffTel","guestTel","islemler","yedekler"];
+const MANAGER_ONLY = ["basvurular","sifreTalepleri","staffTel","yedekler"];
+const PRIV = {staff:"staffTel", guests:"guestTel"};   // telefon numaraları ayrı ve korumalı tutulur
+const raw = {staff:[], guests:[]}, telMap = {staffTel:{}, guestTel:{}};
+function mergePriv(){
+  S.staff = raw.staff.map(x => ({...x, tel: telMap.staffTel[x.id] || x.tel || ""}));
+  S.guests = raw.guests.map(x => ({...x, tel: telMap.guestTel[x.id] || x.tel || ""}));
+}
+async function splitPriv(c, id, data){
+  if (!PRIV[c] || !DB || !("tel" in data)) return data;
+  const {tel, ...rest} = data;
+  try { if (tel) await DB.collection(PRIV[c]).doc(id).set({tel}); else await DB.collection(PRIV[c]).doc(id).delete(); } catch(e){}
+  return rest;
+}
+const LOG_SKIP = ["chat","islemler","yedekler","staffTel","guestTel"];
+function summaryOf(c, d){ d = d || {}; return String(d.ad || d.no || d.misafir || d.metin || d.tarih || d.hizmet || "").slice(0, 80); }
+function logOp(islem, c, id, data){
+  if (!DB || LOG_SKIP.includes(c)) return;
+  DB.collection("islemler").add({zaman:Date.now(), kim:meId||"", kimAd: me() ? me().ad : (isAdmin() ? "Genel Müdür" : ""), islem, koleksiyon:c, belge:id, ozet:summaryOf(c, data)}).catch(()=>{});
+}
 const S = {}; COLLS.forEach(c => S[c] = []);
 let DB = null, FS = null, authUser = null, member = null, unsubs = [], loginErr = "", mode = "loading", loadNote = "", signingUp = false;
 let meId = null;
@@ -268,15 +286,15 @@ let meId = null;
 const store = {
   async add(c, data){ return store.set(c, uid8(), data); },
   async set(c, id, data){
-    if (DB){ try { await DB.collection(c).doc(id).set(data); return true; } catch(e){ handleErr(e); return false; } }
+    if (DB){ try { const isNew = !(S[c]||[]).some(x=>x.id===id); const d = await splitPriv(c, id, data); await DB.collection(c).doc(id).set(d); logOp(isNew?"ekledi":"değiştirdi", c, id, data); return true; } catch(e){ handleErr(e); return false; } }
     S[c] = [...S[c].filter(x=>x.id!==id), {id, ...data}]; refresh(); return true;
   },
   async upd(c, id, data){
-    if (DB){ try { await DB.collection(c).doc(id).update(data); return true; } catch(e){ handleErr(e); return false; } }
+    if (DB){ try { const d = await splitPriv(c, id, data); if (Object.keys(d).length) await DB.collection(c).doc(id).update(d); logOp("değiştirdi", c, id, {...((S[c]||[]).find(x=>x.id===id)||{}), ...data}); return true; } catch(e){ handleErr(e); return false; } }
     S[c] = S[c].map(x => x.id===id ? {...x, ...data} : x); refresh(); return true;
   },
   async del(c, id){
-    if (DB){ try { await DB.collection(c).doc(id).delete(); return true; } catch(e){ handleErr(e); return false; } }
+    if (DB){ try { const old = (S[c]||[]).find(x=>x.id===id); await DB.collection(c).doc(id).delete(); if (PRIV[c]) DB.collection(PRIV[c]).doc(id).delete().catch(()=>{}); logOp("sildi", c, id, old); return true; } catch(e){ handleErr(e); return false; } }
     S[c] = S[c].filter(x => x.id!==id); refresh(); return true;
   }
 };
@@ -388,17 +406,19 @@ function renderTop(){
   }
   $("#bellBtn").onclick = () => go("bildirim");
 }
-function goBack(){ if ($("#sh")) { closeSheet(); return; } if (current !== "home") go("home"); }
+function goBack(){ if ($("#sh")) { if (!sheetLocked) closeSheet(); return; } if (current !== "home") go("home"); }
 
 /* ---------------- Arayüz parçaları ---------------- */
 function toast(m){ document.querySelectorAll(".toast").forEach(x=>x.remove()); const d=document.createElement("div"); d.className="toast"; d.textContent=m; document.body.appendChild(d); setTimeout(()=>d.remove(), 3500); }
-function sheet(title, html, bind){
-  $("#overlay").innerHTML = `<div class="sheet" id="sh"><div class="pnl"><div class="shead"><h3>${title}</h3><button class="close" id="shX" aria-label="Kapat">✕</button></div>${html}</div></div>`;
-  $("#sh").addEventListener("click", e => { if (e.target.id === "sh") closeSheet(); });
-  $("#shX").onclick = closeSheet;
+let sheetLocked = false;
+function sheet(title, html, bind, opt){
+  sheetLocked = !!(opt && opt.locked);
+  $("#overlay").innerHTML = `<div class="sheet" id="sh"><div class="pnl"><div class="shead"><h3>${title}</h3>${sheetLocked?"":`<button class="close" id="shX" aria-label="Kapat">✕</button>`}</div>${html}</div></div>`;
+  $("#sh").addEventListener("click", e => { if (e.target.id === "sh" && !sheetLocked) closeSheet(); });
+  if ($("#shX")) $("#shX").onclick = closeSheet;
   if (bind) bind();
 }
-function closeSheet(){ $("#overlay").innerHTML = ""; }
+function closeSheet(){ $("#overlay").innerHTML = ""; sheetLocked = false; }
 function confirmSheet(msg, onYes, yesLabel){
   sheet(esc(msg), `<div class="row2"><button class="btn" id="cNo">Vazgeç</button><button class="btn pri" id="cYes">${esc(yesLabel||"Evet")}</button></div>`, () => {
     $("#cNo").onclick = closeSheet; $("#cYes").onclick = () => { closeSheet(); onYes(); };
@@ -418,7 +438,7 @@ function authMsg(err){
   if (/invalid-credential|wrong-password|user-not-found|invalid-email|invalid-login/.test(c)) return "Telefon numarası ya da şifre yanlış.";
   if (/network-request-failed|unavailable/.test(c)) return "İnternet bağlantısı yok. Bağlantını kontrol edip tekrar dene.";
   if (/too-many-requests/.test(c)) return "Çok fazla deneme yapıldı. Birkaç dakika sonra tekrar dene.";
-  if (/weak-password/.test(c)) return "Şifre en az 6 karakter olmalı.";
+  if (/weak-password|short-password/.test(c)) return "Şifre en az 8 karakter olmalı.";
   if (/email-already-in-use/.test(c)) return "Bu hesap zaten var.";
   if (/requires-recent-login/.test(c)) return "Güvenlik için mevcut şifreni doğru girmelisin.";
   if (/operation-not-allowed/.test(c)) return "Firebase'de E-posta/Şifre girişi kapalı.";
@@ -436,7 +456,7 @@ async function init(){
     if (signingUp) return;
     authUser = u;
     unsubs.forEach(f => { try { f(); } catch(e){} }); unsubs = [];
-    COLLS.forEach(c => S[c] = []); member = null; meId = null; firstTasks = true;
+    COLLS.forEach(c => S[c] = []); raw.staff = []; raw.guests = []; telMap.staffTel = {}; telMap.guestTel = {}; member = null; meId = null; firstTasks = {}; firstChat = true; migrated = false; backupChecked = false;
     if (!u){ mode = "login"; renderLogin(); return; }
     try { const d = await FS.collection("members").doc(u.uid).get(); member = d.exists ? d.data() : null; } catch(e){ member = null; }
     if (!member && !isAdmin()){
@@ -451,27 +471,60 @@ async function init(){
     subscribe();
     askNotifyPermission();
     if (isAdmin() && !meId) setTimeout(profileSheet, 600);
+    if (member && member.sifreDegistir) setTimeout(() => changePwSheet(true), 700);
   });
 }
-let firstTasks = true;
+let firstTasks = {}, firstChat = true, migrated = false, backupChecked = false;
+const gmM = () => isAdmin() || (member && member.rol === "gm");
+const mgrM = () => gmM() || (member && member.rol === "mudur");
 function subscribe(){
   const timer = setTimeout(()=>{ if(mode==="loading"){ loadNote = "Veriler yüklenemedi; internet gelince otomatik güncellenecek."; mode = "live"; refresh(); } }, 10000);
+  const fail = c => err => { if (mode==="loading"){ mode = "live"; clearTimeout(timer); } if (!MANAGER_ONLY.includes(c) && c !== "guestTel" && c !== "islemler") loadNote = "Bazı veriler okunamadı. İnternetini kontrol et."; refresh(); };
   COLLS.forEach(c => {
-    if (MANAGER_ONLY.includes(c) && !canStaffAdminFromMember()) return;
+    if (c === "tasks") return;
+    if (MANAGER_ONLY.includes(c) && !mgrM()) return;
+    if (c === "guestTel" && !(mgrM() || (member && member.dept === "Resepsiyon"))) return;
+    if (c === "islemler" && !gmM()) return;
     let q = DB.collection(c);
     if (c === "chat") q = q.orderBy("zaman","desc").limit(200);
     if (c === "gmsgs") q = q.orderBy("zaman","desc").limit(300);
-    if (c === "tasks") q = q.where("talep", ">=", Date.now() - 45*864e5);
     if (c === "shifts") q = q.where("giris", ">=", Date.now() - 31*864e5);
     if (c === "guests") q = q.orderBy("olusturma","desc").limit(600);
+    if (c === "islemler") q = q.orderBy("zaman","desc").limit(300);
+    if (c === "yedekler") q = q.orderBy("zaman","desc").limit(60);
     unsubs.push(q.onSnapshot(snap => {
-      if (c === "tasks") onTaskChanges(snap);
-      S[c] = snap.docs.map(d => ({id:d.id, ...d.data()}));
+      const docs = snap.docs.map(d => ({id:d.id, ...d.data()}));
+      if (c === "chat") onChatChanges(snap);
+      if (c === "staff" || c === "guests"){ raw[c] = docs; mergePriv(); }
+      else if (c === "staffTel" || c === "guestTel"){ telMap[c] = Object.fromEntries(docs.map(d => [d.id, d.tel])); mergePriv(); }
+      else S[c] = docs;
       if (mode === "loading" && c === "staff"){ mode = "live"; clearTimeout(timer); loadNote = ""; }
       refresh();
-      if (c === "tasks" || c === "staff") scheduleAlarms();
-    }, err => { if (mode==="loading"){ mode = "live"; clearTimeout(timer); } if (!MANAGER_ONLY.includes(c)) { loadNote = "Bazı veriler okunamadı. İnternetini kontrol et."; } refresh(); }));
+      if (c === "staff") { scheduleAlarms(); maybeMigrate(); }
+      if (c === "yedekler") maybeAutoBackup();
+    }, fail(c)));
   });
+  subscribeTasks(fail("tasks"));
+}
+function subscribeTasks(onErr){
+  const sid = member && member.staffId;
+  const qs = gmM() ? [DB.collection("tasks").where("talep", ">=", Date.now() - 45*864e5)]
+    : [member && member.dept ? DB.collection("tasks").where("dept", "==", member.dept) : null, sid ? DB.collection("tasks").where("atanan", "==", sid) : null, sid ? DB.collection("tasks").where("olusturan", "==", sid) : null].filter(Boolean);
+  const parts = qs.map(() => new Map());
+  qs.forEach((q, i) => unsubs.push(q.onSnapshot(snap => {
+    onTaskChanges(snap, i);
+    parts[i] = new Map(snap.docs.map(d => [d.id, {id:d.id, ...d.data()}]));
+    const all = new Map(); parts.forEach(m => m.forEach((v,k) => all.set(k, v)));
+    S.tasks = [...all.values()];
+    refresh(); scheduleAlarms();
+  }, onErr)));
+}
+async function maybeMigrate(){
+  if (migrated || !gmM() || !DB) return; migrated = true;
+  const del = firebase.firestore.FieldValue.delete();
+  for (const c of ["staff","guests"]) for (const x of raw[c]) if (x.tel){
+    try { await DB.collection(PRIV[c]).doc(x.id).set({tel:x.tel}); await DB.collection(c).doc(x.id).update({tel:del}); } catch(e){}
+  }
 }
 const canStaffAdminFromMember = () => isAdmin() || (member && ["gm","mudur"].includes(member.rol));
 
@@ -510,7 +563,7 @@ function registerSheet(){
       <div class="fld"><label for="rA">Ad soyad *</label><input id="rA" required autocomplete="name"></div>
       <div class="fld"><label for="rT">Telefon *</label><input id="rT" type="tel" inputmode="tel" placeholder="05xx xxx xx xx" required></div>
       <div class="row2"><div class="fld"><label for="rD">Departman *</label><select id="rD">${deptOptions("Resepsiyon")}</select></div><div class="fld"><label for="rU">Görevin / unvanın</label><input id="rU" placeholder="Örn. Garson"></div></div>
-      <div class="row2"><div class="fld"><label for="rP">Şifre *</label><input id="rP" type="password" minlength="6" required autocomplete="new-password"></div><div class="fld"><label for="rP2">Şifre tekrar *</label><input id="rP2" type="password" required autocomplete="new-password"></div></div>
+      <div class="row2"><div class="fld"><label for="rP">Şifre *</label><input id="rP" type="password" minlength="8" required autocomplete="new-password"></div><div class="fld"><label for="rP2">Şifre tekrar *</label><input id="rP2" type="password" required autocomplete="new-password"></div></div>
       <div id="rE"></div><button class="btn go block" id="rGo">Başvuruyu gönder</button></form>`, () => {
     $("#rgf").onsubmit = async e => { e.preventDefault();
       const tel = normTel($("#rT").value), err = m => $("#rE").innerHTML = `<div class="banner">${esc(m)}</div>`;
@@ -545,7 +598,7 @@ function setupSheet(){
   sheet("İlk kurulum: genel müdür hesabı", `<div class="hint">Bunu yalnızca bir kez, otelin genel müdürü yapar. Sonra telefon numaran ve bu şifreyle girersin.</div>
     <form class="f" id="sf"><div class="fld"><label for="sA">Ad soyad</label><input id="sA" required></div>
     <div class="fld"><label for="sT">Telefon</label><input id="sT" type="tel" inputmode="tel" placeholder="05xx xxx xx xx" required></div>
-    <div class="row2"><div class="fld"><label for="sP">Şifre</label><input id="sP" type="password" minlength="6" required autocomplete="new-password"></div><div class="fld"><label for="sP2">Şifre tekrar</label><input id="sP2" type="password" required autocomplete="new-password"></div></div>
+    <div class="row2"><div class="fld"><label for="sP">Şifre</label><input id="sP" type="password" minlength="8" required autocomplete="new-password"></div><div class="fld"><label for="sP2">Şifre tekrar</label><input id="sP2" type="password" required autocomplete="new-password"></div></div>
     <div id="sE"></div><button class="btn go block" id="sGo">Kurulumu tamamla</button></form>`, () => {
     $("#sf").onsubmit = async e => { e.preventDefault(); const tel = normTel($("#sT").value), err = m => $("#sE").innerHTML = `<div class="banner">${esc(m)}</div>`;
       if (!telOk(tel)) return err("Telefonu 05xx xxx xx xx şeklinde yaz.");
@@ -564,7 +617,9 @@ let pendingProfile = null;
 async function saveAdminProfile(ad, tel){
   const ex = S.staff.find(s => s.tel === tel);
   const sid = ex ? ex.id : ("p" + uid8());
-  await FS.collection("staff").doc(sid).set({...(ex ? clean(ex) : {}), ad, tel, dept:"Yönetim", rol:"gm", unvan:"Genel Müdür", durum:"aktif", uid:authUser.uid, authEmail:authUser.email});
+  const {tel:_t, ...exs} = ex ? clean(ex) : {};
+  await FS.collection("staff").doc(sid).set({...exs, ad, dept:"Yönetim", rol:"gm", unvan:"Genel Müdür", durum:"aktif", uid:authUser.uid, authEmail:authUser.email});
+  await FS.collection("staffTel").doc(sid).set({tel});
   await FS.collection("members").doc(authUser.uid).set({staffId:sid, rol:"gm", dept:"Yönetim"});
   await FS.collection("logins").doc(tel).set({email:authUser.email, staffId:sid});
   member = {staffId:sid, rol:"gm", dept:"Yönetim"}; meId = sid;
@@ -590,15 +645,20 @@ function accountMenu(){
     if ($("#amOut")) $("#amOut").onclick = () => { closeSheet(); cancelAllAlarms(); firebase.auth().signOut(); };
   });
 }
-function changePwSheet(){
-  sheet("Şifremi değiştir", `<form class="f" id="cpf"><div class="fld"><label for="cO">Mevcut şifre</label><input id="cO" type="password" required autocomplete="current-password"></div>
-    <div class="row2"><div class="fld"><label for="cN">Yeni şifre</label><input id="cN" type="password" minlength="6" required autocomplete="new-password"></div><div class="fld"><label for="cN2">Yeni şifre tekrar</label><input id="cN2" type="password" required autocomplete="new-password"></div></div>
+function genPw(){ const a = "abcdefghjkmnpqrstuvwxyz23456789"; let r = ""; const b = new Uint32Array(8); crypto.getRandomValues(b); for (const x of b) r += a[x % a.length]; return r; }
+function changePwSheet(forced){
+  sheet(forced ? "Kendi şifreni belirle" : "Şifremi değiştir", `${forced?`<div class="hint">Güvenliğin için müdürünün verdiği geçici şifreyi değiştirmelisin.</div>`:""}<form class="f" id="cpf"><div class="fld"><label for="cO">${forced?"Geçici şifre":"Mevcut şifre"}</label><input id="cO" type="password" required autocomplete="current-password"></div>
+    <div class="row2"><div class="fld"><label for="cN">Yeni şifre</label><input id="cN" type="password" minlength="8" required autocomplete="new-password"></div><div class="fld"><label for="cN2">Yeni şifre tekrar</label><input id="cN2" type="password" required autocomplete="new-password"></div></div>
     <div id="cE"></div><button class="btn go block">Değiştir</button></form>`, () => {
     $("#cpf").onsubmit = async e => { e.preventDefault(); const err = m => $("#cE").innerHTML = `<div class="banner">${esc(m)}</div>`;
       if ($("#cN").value !== $("#cN2").value) return err("Yeni şifreler aynı değil.");
-      try { const u = firebase.auth().currentUser; await u.reauthenticateWithCredential(firebase.auth.EmailAuthProvider.credential(u.email, $("#cO").value)); await u.updatePassword($("#cN").value); closeSheet(); toast("Şifren değişti."); }
+      if ($("#cN").value.length < 8) return err("Şifre en az 8 karakter olmalı.");
+      if ($("#cN").value === $("#cO").value) return err("Yeni şifre eskisinden farklı olmalı.");
+      try { const u = firebase.auth().currentUser; await u.reauthenticateWithCredential(firebase.auth.EmailAuthProvider.credential(u.email, $("#cO").value)); await u.updatePassword($("#cN").value);
+        if (member && member.sifreDegistir){ try { await FS.collection("members").doc(u.uid).update({sifreDegistir:false}); member.sifreDegistir = false; } catch(x){} }
+        closeSheet(); toast("Şifren değişti."); }
       catch(er){ err(authMsg(er)); } };
-  });
+  }, {locked: !!forced});
 }
 
 /* ---------------- Personel hesabı aç / şifre sıfırla / pasif yap ---------------- */
@@ -613,22 +673,23 @@ async function giveAccess(st, pw){
   const sa = await secondaryAuth();
   const cred = await sa.createUserWithEmailAndPassword(email, pw);
   const uid = cred.user.uid; await sa.signOut();
-  await FS.collection("members").doc(uid).set({staffId:st.id, rol:st.rol||"personel", dept:st.dept});
+  await FS.collection("members").doc(uid).set({staffId:st.id, rol:st.rol||"personel", dept:st.dept, sifreDegistir:true});
   if (st.uid && st.uid !== uid){ try { await FS.collection("members").doc(st.uid).delete(); } catch(e){} }
   await FS.collection("staff").doc(st.id).update({uid, authEmail:email, durum:"aktif"});
   await FS.collection("logins").doc(st.tel).set({email, staffId:st.id});
   try { await FS.collection("sifreTalepleri").doc(st.tel).delete(); } catch(e){}
+  logOp("şifre verdi", "staff", st.id, st);
 }
 function accessSheet(st, reset){
-  const pw = String(Math.floor(100000 + Math.random()*900000));
+  const pw = genPw();
   if (!telOk(st.tel||"")){ toast("Önce bu personelin telefon numarasını gir."); staffSheet(st.id); return; }
   sheet(`${esc(st.ad)} · ${reset?"şifre sıfırla":"hesap aç"}`, `<div class="hint">Personel ${esc(fmtTel(st.tel))} numarası ve bu şifreyle giriş yapacak.${reset?" Eski şifresi geçersiz olur.":""}</div>
-    <form class="f" id="af"><div class="fld"><label for="aP">Yeni şifre (en az 6 karakter)</label><input id="aP" value="${pw}" minlength="6" required></div><div id="aE"></div>
+    <form class="f" id="af"><div class="fld"><label for="aP">Geçici şifre (en az 8 karakter)</label><input id="aP" value="${pw}" minlength="8" required autocapitalize="none" spellcheck="false"><span class="hint">Personel ilk girişte kendi şifresini belirlemek zorunda.</span></div><div id="aE"></div>
     <button class="btn go block" id="aGo">${reset?"Şifreyi sıfırla":"Hesabı aç"}</button></form>`, () => {
     $("#af").onsubmit = async e => { e.preventDefault(); const b=$("#aGo"); b.disabled=true; b.textContent="Kaydediliyor…"; const p=$("#aP").value;
       try {
         await giveAccess(st, p);
-        const msg = `${APP_ADI} giriş bilgilerin:\nTelefon: ${fmtTel(st.tel)}\nŞifre: ${p}\nUygulamaya girdikten sonra Hesabım > Şifremi değiştir ile kendi şifreni belirleyebilirsin.`;
+        const msg = `${APP_ADI} giriş bilgilerin:\nTelefon: ${fmtTel(st.tel)}\nŞifre: ${p}\nİlk girişte kendi şifreni belirleyeceksin.\nAndroid: ${WEB_ADRES}HotelPlus.apk\niPhone/PC: ${WEB_ADRES}`;
         sheet("Hazır", `<div class="card"><div>Telefon: <b class="num">${esc(fmtTel(st.tel))}</b></div><div>Şifre: <b class="num">${esc(p)}</b></div></div>
           <a class="btn go block" style="text-align:center;text-decoration:none" href="${esc(smsLink(st.tel, msg))}">SMS ile gönder</a>
           <button class="btn block" id="hCopy">Kopyala</button><button class="btn block" id="hOk">Kapat</button>`, () => {
@@ -642,6 +703,7 @@ async function deactivate(st, quiet){
     if (st.uid) await FS.collection("members").doc(st.uid).delete();
     if (st.tel) await FS.collection("logins").doc(st.tel).delete();
     await FS.collection("staff").doc(st.id).update({durum:"pasif"});
+    logOp("girişini kapattı", "staff", st.id, st);
     if (!quiet) toast(`${st.ad} artık giriş yapamaz.`);
   } catch(e){ handleErr(e); }
 }
@@ -649,8 +711,10 @@ async function approveApp(b){
   try {
     const ex = S.staff.find(s => s.tel === b.tel);
     const sid = ex ? ex.id : "p" + uid8();
-    const base = ex ? clean(ex) : {ad:b.ad, tel:b.tel, dept:b.dept, unvan:b.unvan||"", rol:"personel"};
+    const {tel:_t, ...base} = ex ? clean(ex) : {ad:b.ad, dept:b.dept, unvan:b.unvan||"", rol:"personel"};
     await FS.collection("staff").doc(sid).set({...base, dept: ex ? ex.dept : b.dept, uid:b.uid, authEmail:b.email, durum:"aktif"});
+    await FS.collection("staffTel").doc(sid).set({tel:b.tel});
+    logOp("onayladı", "staff", sid, {ad:b.ad});
     await FS.collection("members").doc(b.uid).set({staffId:sid, rol:base.rol||"personel", dept: ex ? ex.dept : b.dept});
     await FS.collection("logins").doc(b.tel).set({email:b.email, staffId:sid});
     await FS.collection("basvurular").doc(b.id).delete();
@@ -684,12 +748,14 @@ VIEWS.home = {
         ${T("misafir","guest","var(--ok)","var(--ok-soft)","Misafirler")}
         ${T("mesaj","msg","var(--ok)","var(--ok-soft)","Misafir mesajları", newMsg)}
         ${T("rez","rez","var(--warn)","var(--warn-soft)","Rezervasyon", S.reservations.filter(x=>x.durum==="bekliyor").length)}
-        ${T("sohbet","chat","var(--info)","var(--info-soft)","Ekip sohbeti")}
+        ${T("sohbet","chat","var(--info)","var(--info-soft)","Ekip sohbeti", unreadChat())}
         ${T("mesai","clock","var(--warn)","var(--warn-soft)","Mesai")}
         ${canStaffAdmin()?T("personel","users","var(--accent)","var(--accent-soft)","Personel", apps):""}
         ${isManager()?T("demirbas","box","var(--info)","var(--info-soft)","Demirbaş", S.assets.filter(x=>x.durum==="arizali").length):""}
         ${isManager()?T("enerji","bolt","var(--ok)","var(--ok-soft)","Enerji"):""}
         ${isManager()?T("sadakat","star","var(--warn)","var(--warn-soft)","Sadakat"):""}
+        ${isManager()&&mode!=="demo"?T("yedek","box","var(--ok)","var(--ok-soft)","Yedekler"):""}
+        ${isGM()&&mode!=="demo"?T("kayit","ops","var(--muted)","var(--bg)","İşlem kaydı"):""}
       </div>
       <div class="legend"><span><i style="background:var(--ok)"></i>Süresi içinde</span><span><i style="background:var(--warn)"></i>Süre doldu → departman müdürü</span><span><i style="background:var(--bad)"></i>Çok gecikti → genel müdür</span></div>`;
   },
@@ -709,7 +775,7 @@ function taskCard(t){
   if (t.durum === "open" && (t.atanan === meId || (!t.atanan && (sameDept || canManage)))) acts.push(`<button class="btn ok sm" data-act="start" data-id="${esc(t.id)}">Başlat</button>`);
   if (t.durum !== "done" && (t.atanan === meId || canManage || (sameDept && !t.atanan))) acts.push(`<button class="btn pri sm" data-act="done" data-id="${esc(t.id)}">Bitir</button>`);
   if (t.durum !== "done" && (canManage || sameDept)) acts.push(`<button class="btn sm" data-act="assign" data-id="${esc(t.id)}">Ata</button>`);
-  if (canManage || t.olusturan === meId) acts.push(`<span style="flex:1"></span><button class="btn sm danger" data-act="del" data-id="${esc(t.id)}">Sil</button>`);
+  if (canManage) acts.push(`<span style="flex:1"></span><button class="btn sm danger" data-act="del" data-id="${esc(t.id)}">Sil</button>`);
   return `<article class="card task lv-${lv}">
     <div class="t1"><div><div class="ttl">${esc(t.ad)}</div><div class="meta"><span>${esc(t.konum||"")}</span><span>#${esc(t.no||"")}</span></div></div><span class="chip ${lc}">${ll}</span></div>
     <div class="meta"><span>Departman: <b>${esc(t.dept)}</b></span><span>Atanan: <b>${t.atanan?esc(nameOf(t.atanan)):'<span class="late">Atanmadı</span>'}</b></span></div>
@@ -952,11 +1018,12 @@ function autoGuest(roomSel, nameSel){
 let roomFilter = "all";
 VIEWS.odalar = {
   title: "Odalar",
-  shell(){ return `${isManager()?`<div class="row2"><button class="btn go" id="oImp">Oda listesi yükle</button><button class="btn" id="oGen">Otomatik oluştur</button></div><button class="btn danger" id="oSel">Seçerek sil</button>`:""}
+  shell(){ return `${isManager()?`<div class="row2"><button class="btn go" id="oImp">Oda listesi yükle</button><button class="btn" id="oGen">Otomatik oluştur</button></div><div class="row2"><button class="btn danger" id="oSel">Seçerek sil</button>${isGM()?`<button class="btn danger" id="oAll">Tüm odaları sil</button>`:"<span></span>"}</div>`:""}
     <div class="tabs" id="otabs">${[["all","Tümü"],["bos","Boş"],["dolu","Dolu"],["kirli","Kirli"],["ariza","Arızalı"]].map(([k,l])=>`<button class="tab ${k===roomFilter?"on":""}" data-t="${k}">${l}</button>`).join("")}</div>`; },
   after(){
     if ($("#oImp")) $("#oImp").onclick = () => importSheet("rooms");
     if ($("#oGen")) $("#oGen").onclick = genRoomsSheet;
+    if ($("#oAll")) $("#oAll").onclick = () => { const n = S.rooms.length; if (!n) return toast("Silinecek oda yok."); confirmSheet(`${n} odanın hepsi silinsin mi? Bu geri alınamaz (yedekten geri yüklenebilir).`, async () => { const ids = S.rooms.map(r=>r.id); for (let i=0;i<ids.length;i++){ await store.del("rooms", ids[i]); } toast(`${n} oda silindi.`); }, "Hepsini sil"); };
     if ($("#oSel")) $("#oSel").onclick = () => { roomSel = roomSel ? null : new Set(); $("#oSel").textContent = roomSel ? "Seçimi bitir" : "Seçerek sil"; if (!roomSel) document.querySelectorAll(".bulkbar").forEach(n=>n.remove()); refresh(); };
     document.querySelectorAll("#otabs .tab").forEach(b => b.onclick = () => { roomFilter = b.dataset.t; document.querySelectorAll("#otabs .tab").forEach(x=>x.classList.toggle("on", x===b)); refresh(); });
   },
@@ -1022,7 +1089,7 @@ VIEWS.misafir = {
     const l = S.guests.filter(g=>g.durum===guestTab).sort((a,b)=> guestTab==="cikti" ? (b.cikisZaman||0)-(a.cikisZaman||0) : String(a.oda||"").localeCompare(String(b.oda||""), "tr", {numeric:true})).slice(0, guestTab==="cikti"?50:1000);
     return l.length ? l.map(g => `<div class="card"><div class="li"><div class="main"><b>${esc(g.ad)}</b><span class="num">Oda ${esc(g.oda)} · ${esc(trD(g.giris))} – ${esc(trD(g.cikis))} · ${esc(g.kisi)} kişi${g.dil?" · "+esc(g.dil):""}</span>${g.not?`<span>${esc(g.not)}</span>`:""}</div>
       ${g.durum==="konakliyor"&&g.cikis<=today?'<span class="chip bad">Bugün çıkış</span>':g.durum==="beklenen"&&g.giris<=today?'<span class="chip info">Bugün giriş</span>':""}</div>
-      <div class="acts">${g.durum==="beklenen"?`<button class="btn ok sm" data-g="in" data-id="${esc(g.id)}">Giriş yap</button>`:""}${g.durum==="konakliyor"?`<button class="btn pri sm" data-g="out" data-id="${esc(g.id)}">Çıkış yap</button><button class="btn sm" data-g="task" data-id="${esc(g.id)}">İstek gönder</button>`:""}<span style="flex:1"></span>${g.durum!=="konakliyor"?`<button class="btn sm danger" data-g="del" data-id="${esc(g.id)}">Sil</button>`:""}</div></div>`).join("")
+      <div class="acts">${g.durum==="beklenen"?`<button class="btn ok sm" data-g="in" data-id="${esc(g.id)}">Giriş yap</button>`:""}${g.durum==="konakliyor"?`<button class="btn pri sm" data-g="out" data-id="${esc(g.id)}">Çıkış yap</button><button class="btn sm" data-g="task" data-id="${esc(g.id)}">İstek gönder</button>`:""}<span style="flex:1"></span>${g.durum!=="konakliyor"&&isManager()?`<button class="btn sm danger" data-g="del" data-id="${esc(g.id)}">Sil</button>`:""}</div></div>`).join("")
       : `<div class="empty">${guestTab==="konakliyor"?"Konaklayan misafir yok. + Misafir ile ekle.":guestTab==="beklenen"?"Beklenen misafir yok.":"Çıkış kaydı yok."}</div>`;
   },
   bind(){ document.querySelectorAll("[data-g]").forEach(b => b.onclick = () => { const g=guestById(b.dataset.id); if(!g)return;
@@ -1082,7 +1149,7 @@ VIEWS.rez = {
     const l = [...S.reservations].filter(r=>r.durum!=="iptal" || r.tarih>=dayKey(Date.now())).sort((a,b)=>(a.tarih+a.saat).localeCompare(b.tarih+b.saat));
     const chip = {bekliyor:["Bekliyor","warn"], onay:["Onaylandı","ok"], iptal:["İptal","bad"]};
     return l.length ? l.map(r => `<div class="card"><div class="li"><div class="main"><b>${esc(svc(r.hizmet).ad)}</b><span class="num">${esc(r.misafir)} · Oda ${esc(r.oda)} · ${esc(trD(r.tarih))} ${esc(r.saat)} · ${esc(r.kisi)} kişi</span>${r.not?`<span>${esc(r.not)}</span>`:""}</div><span class="chip ${chip[r.durum][1]}">${chip[r.durum][0]}</span></div>
-      <div class="acts">${r.durum==="bekliyor"?`<button class="btn ok sm" data-r="onay" data-id="${esc(r.id)}">Onayla</button>`:""}${r.durum!=="iptal"?`<button class="btn sm danger" data-r="iptal" data-id="${esc(r.id)}">İptal et</button>`:`<button class="btn sm danger" data-r="sil" data-id="${esc(r.id)}">Sil</button>`}</div></div>`).join("") : `<div class="empty">Henüz rezervasyon yok. Yukarıdan bir hizmet seç.</div>`;
+      <div class="acts">${r.durum==="bekliyor"?`<button class="btn ok sm" data-r="onay" data-id="${esc(r.id)}">Onayla</button>`:""}${r.durum!=="iptal"?`<button class="btn sm danger" data-r="iptal" data-id="${esc(r.id)}">İptal et</button>`:isManager()?`<button class="btn sm danger" data-r="sil" data-id="${esc(r.id)}">Sil</button>`:""}</div></div>`).join("") : `<div class="empty">Henüz rezervasyon yok. Yukarıdan bir hizmet seç.</div>`;
   },
   bind(){ document.querySelectorAll("[data-r]").forEach(b => b.onclick = () => { const a=b.dataset.r; if(a==="sil") store.del("reservations", b.dataset.id); else store.upd("reservations", b.dataset.id, {durum:a}); }); }
 };
@@ -1108,7 +1175,7 @@ VIEWS.mesaj = {
     const l = [...S.gmsgs].sort((a,b)=>(a.durum==="yeni"?0:1)-(b.durum==="yeni"?0:1) || b.zaman-a.zaman);
     return l.length ? l.map(m => `<div class="card"><div class="li"><div class="main"><b>Oda ${esc(m.oda)} · ${esc(m.misafir||"Misafir")}</b><span class="num">${fmtDT(m.zaman)}</span></div><span class="chip ${m.durum==="yeni"?"bad":"ok"}">${m.durum==="yeni"?"Yeni":"Yanıtlandı"}</span></div>
       <div>${esc(m.metin)}</div>${m.cevap?`<div class="banner" style="background:var(--ok-soft)"><b>Yanıt:</b> ${esc(m.cevap)}</div>`:""}
-      <div class="acts">${m.durum==="yeni"?`<button class="btn go sm" data-m="task" data-id="${esc(m.id)}">Departmana gönder</button><button class="btn sm" data-m="reply" data-id="${esc(m.id)}">Yanıtla</button>`:""}<span style="flex:1"></span><button class="btn sm danger" data-m="del" data-id="${esc(m.id)}">Sil</button></div></div>`).join("")
+      <div class="acts">${m.durum==="yeni"?`<button class="btn go sm" data-m="task" data-id="${esc(m.id)}">Departmana gönder</button><button class="btn sm" data-m="reply" data-id="${esc(m.id)}">Yanıtla</button>`:""}<span style="flex:1"></span>${isManager()?`<button class="btn sm danger" data-m="del" data-id="${esc(m.id)}">Sil</button>`:""}</div></div>`).join("")
       : `<div class="empty">Mesaj yok. Gelen bir misafir talebini + Mesaj ile kaydet.</div>`;
   },
   bind(){
@@ -1134,9 +1201,22 @@ function replySheet(m){
 }
 
 /* ======================= EKİP SOHBETİ ======================= */
+let chatSeen = 0; try { chatSeen = +localStorage.getItem("hp_chat_seen") || 0; } catch(e){}
+function markChatSeen(){ chatSeen = Date.now(); try { localStorage.setItem("hp_chat_seen", String(chatSeen)); } catch(e){} }
+const unreadChat = () => S.chat.filter(m => m.kim !== meId && m.zaman > chatSeen).length;
+function onChatChanges(snap){
+  if (firstChat){ firstChat = false; return; }
+  snap.docChanges().forEach(ch => {
+    if (ch.type !== "added" || (ch.doc.metadata && ch.doc.metadata.hasPendingWrites)) return;
+    const m = ch.doc.data(); if (!m || m.kim === meId) return;
+    if (current === "sohbet" && !document.hidden){ beep(); markChatSeen(); return; }
+    notifyNow("Sohbet · " + nameOf(m.kim), String(m.metin||"").slice(0,120));
+  });
+}
 VIEWS.sohbet = {
   title: "Ekip sohbeti",
   after(){
+    markChatSeen();
     const c = document.createElement("div"); c.className = "composer";
     c.innerHTML = `<form class="in" id="cf"><input id="cIn" placeholder="Mesaj yaz…" aria-label="Mesaj" autocomplete="off"><button class="btn go" type="submit">Gönder</button></form>`;
     document.body.appendChild(c);
@@ -1144,6 +1224,7 @@ VIEWS.sohbet = {
   },
   live(){
     const l = [...S.chat].sort((a,b)=>a.zaman-b.zaman);
+    markChatSeen();
     setTimeout(()=>window.scrollTo(0, document.body.scrollHeight), 0);
     return l.length ? `<div class="chat">${l.map(m=>`<div class="bubble ${m.kim===meId?"me":""}"><small>${esc(nameOf(m.kim))} · ${fmtT(m.zaman)}</small>${esc(m.metin)}</div>`).join("")}</div>` : `<div class="empty">Henüz mesaj yok.</div>`;
   }
@@ -1216,6 +1297,112 @@ VIEWS.sadakat = {
   },
   bind(){ document.querySelectorAll("[data-p]").forEach(b => b.onclick = () => { const x=S.loyalty.find(y=>y.id===b.dataset.id);
     if(b.dataset.p==="del") confirmSheet("Misafir silinsin mi?", ()=>store.del("loyalty", x.id), "Sil"); else store.upd("loyalty", x.id, {puan:Math.max(0,(x.puan||0)+(+b.dataset.p))}); }); }
+};
+
+
+/* ======================= YEDEKLER ======================= */
+const YEDEK_KOLL = ["staff","staffTel","tasks","rooms","guests","guestTel","reservations","gmsgs","assets","energy","loyalty","shifts","chat"];
+const OTO_YEDEK_SAKLA = 30;
+let backupBusy = false;
+async function collectAll(){
+  const out = {};
+  for (const c of YEDEK_KOLL){ const snap = await DB.collection(c).get(); out[c] = snap.docs.map(d => ({id:d.id, ...d.data()})); }
+  return out;
+}
+async function createBackup(tur){
+  if (backupBusy || !DB) return null; backupBusy = true;
+  try {
+    const data = await collectAll();
+    const id = "y" + Date.now();
+    const sayilar = {}; Object.entries(data).forEach(([c, l]) => sayilar[c] = l.length);
+    const parts = [];
+    for (const [c, list] of Object.entries(data)){
+      let cur = [], size = 0;
+      for (const d of list){ const j = JSON.stringify(d); if (size + j.length > 600000 && cur.length){ parts.push({c, json:"[" + cur.join(",") + "]"}); cur = []; size = 0; } cur.push(j); size += j.length + 1; }
+      if (cur.length) parts.push({c, json:"[" + cur.join(",") + "]"});
+    }
+    for (let i=0; i<parts.length; i++) await DB.collection("yedekler").doc(id).collection("parca").doc(String(i).padStart(4,"0")).set(parts[i]);
+    await DB.collection("yedekler").doc(id).set({zaman:Date.now(), tur, kim:meId||"", kimAd: me() ? me().ad : "Genel Müdür", sayilar, parca:parts.length});
+    return id;
+  } finally { backupBusy = false; }
+}
+async function readBackup(b){
+  const snap = await DB.collection("yedekler").doc(b.id).collection("parca").get();
+  const out = {}; snap.docs.sort((a,c)=>a.id.localeCompare(c.id)).forEach(d => { const p = d.data(); out[p.c] = (out[p.c]||[]).concat(JSON.parse(p.json)); });
+  return out;
+}
+async function deleteBackup(b){
+  const snap = await DB.collection("yedekler").doc(b.id).collection("parca").get();
+  for (const d of snap.docs) await d.ref.delete();
+  await DB.collection("yedekler").doc(b.id).delete();
+}
+async function maybeAutoBackup(){
+  if (backupChecked || !gmM() || mode === "demo") return; backupChecked = true;
+  const last = S.yedekler.filter(b => b.tur === "otomatik")[0];
+  if (!last || Date.now() - last.zaman > 23*3600e3){
+    try { await createBackup("otomatik"); } catch(e){}
+    const old = S.yedekler.filter(b => b.tur === "otomatik").slice(OTO_YEDEK_SAKLA);
+    for (const b of old){ try { await deleteBackup(b); } catch(e){} }
+  }
+  try { const cut = Date.now() - 90*864e5; const o = await DB.collection("islemler").where("zaman","<",cut).limit(200).get(); for (const d of o.docs) await d.ref.delete(); } catch(e){}
+}
+function fileName(ts){ const d = new Date(ts); return `HotelPlus-yedek-${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}.json`; }
+async function shareFile(name, text){
+  if (isNative() && FSys && ShareP){
+    const w = await FSys.writeFile({path:name, data:text, directory:"CACHE", encoding:"utf8"});
+    await ShareP.share({title:name, text:"HotelPlus yedeği", files:[w.uri], dialogTitle:"Yedeği gönder"});
+    return;
+  }
+  const file = new File([text], name, {type:"application/json"});
+  if (navigator.canShare && navigator.canShare({files:[file]})){ try { await navigator.share({files:[file], title:name}); return; } catch(e){ if (e && e.name === "AbortError") return; } }
+  const a = document.createElement("a"); a.href = URL.createObjectURL(file); a.download = name; document.body.appendChild(a); a.click(); setTimeout(()=>{ URL.revokeObjectURL(a.href); a.remove(); }, 2000);
+}
+VIEWS.yedek = {
+  title: "Yedekler", allow: () => isManager(),
+  shell(){ return `<div class="hint">Her gün genel müdürün uygulaması açıldığında otomatik yedek alınır (son ${OTO_YEDEK_SAKLA} gün saklanır). Yedekleri genel müdür ve departman müdürleri görür. İstediğin yedeği mail, WhatsApp ya da Drive ile gönderebilirsin.</div>
+    ${isGM()?`<button class="btn go block" id="yNow">Şimdi yedek al</button>`:""}`; },
+  after(){ if ($("#yNow")) $("#yNow").onclick = async () => { const b = $("#yNow"); b.disabled = true; b.textContent = "Yedek alınıyor…"; try { await createBackup("elle"); toast("Yedek alındı."); } catch(e){ handleErr(e); } b.disabled = false; b.textContent = "Şimdi yedek al"; }; },
+  live(){
+    if (!S.yedekler.length) return `<div class="empty">Henüz yedek yok.${isGM()?" İlk yedek birazdan otomatik alınacak ya da yukarıdan hemen al.":" Genel müdürün uygulaması açıldığında otomatik alınır."}</div>`;
+    return S.yedekler.map(b => { const n = b.sayilar || {}; return `<div class="card"><div class="li"><div class="main"><b class="num">${fmtD(b.zaman)} ${fmtT(b.zaman)}</b><span>${b.tur==="otomatik"?"Otomatik":"Elle"} · ${esc(b.kimAd||"")} · ${n.staff||0} personel, ${n.tasks||0} görev, ${n.rooms||0} oda, ${n.guests||0} misafir</span></div></div>
+      <div class="acts"><button class="btn go sm" data-y="send" data-id="${esc(b.id)}">Gönder / indir</button>${isGM()?`<button class="btn sm" data-y="restore" data-id="${esc(b.id)}">Geri yükle</button><span style="flex:1"></span><button class="btn sm danger" data-y="del" data-id="${esc(b.id)}">Sil</button>`:""}</div></div>`; }).join("");
+  },
+  bind(){
+    document.querySelectorAll("[data-y]").forEach(btn => btn.onclick = async () => {
+      const b = S.yedekler.find(x => x.id === btn.dataset.id); if (!b) return;
+      if (btn.dataset.y === "send"){ btn.disabled = true; btn.textContent = "Hazırlanıyor…"; try { const data = await readBackup(b); await shareFile(fileName(b.zaman), JSON.stringify({uygulama:"HotelPlus", surum:APP_VERSION, zaman:b.zaman, veriler:data}, null, 1)); } catch(e){ toast("Yedek hazırlanamadı."); } btn.disabled = false; btn.textContent = "Gönder / indir"; }
+      if (btn.dataset.y === "del") confirmSheet("Bu yedek silinsin mi?", async () => { try { await deleteBackup(b); toast("Yedek silindi."); } catch(e){ handleErr(e); } }, "Sil");
+      if (btn.dataset.y === "restore") confirmSheet(`${fmtD(b.zaman)} ${fmtT(b.zaman)} yedeği geri yüklensin mi? Yedekteki kayıtlar geri gelir ve aynı kayıtların şimdiki hâlinin üzerine yazılır. Yedekten sonra eklenen kayıtlar silinmez.`, () => restoreBackup(b), "Geri yükle");
+    });
+  }
+};
+async function restoreBackup(b){
+  sheet("Geri yükleniyor", `<div id="rsP" class="muted">Başlıyor…</div>`, null, {locked:true});
+  try {
+    const data = await readBackup(b);
+    let n = 0, total = Object.entries(data).filter(([c]) => c !== "chat").reduce((m,[,l]) => m + l.length, 0);
+    for (const [c, list] of Object.entries(data)){
+      if (c === "chat") continue;
+      for (const d of list){ const {id, ...rest} = d; if (PRIV[c]) delete rest.tel; await DB.collection(c).doc(id).set(rest); n++; if (n % 20 === 0 && $("#rsP")) $("#rsP").textContent = `${n} / ${total} kayıt`; }
+    }
+    logOp("geri yükledi", "yedekler", b.id, {ad: fmtD(b.zaman)});
+    closeSheet(); toast(`${n} kayıt geri yüklendi.`);
+  } catch(e){ closeSheet(); handleErr(e); }
+}
+
+/* ======================= İŞLEM KAYDI ======================= */
+const KOLL_AD = {tasks:"Görev", staff:"Personel", rooms:"Oda", guests:"Misafir", reservations:"Rezervasyon", gmsgs:"Misafir mesajı", assets:"Demirbaş", energy:"Enerji", loyalty:"Sadakat", shifts:"Mesai", basvurular:"Başvuru", sifreTalepleri:"Şifre talebi", yedekler:"Yedek"};
+let logFilter = "";
+VIEWS.kayit = {
+  title: "İşlem kaydı", allow: () => isGM(),
+  shell(){ return `<div class="hint">Kim neyi ekledi, değiştirdi ya da sildi. Son 90 gün tutulur, sadece sen görürsün.</div><div class="tabs" id="ktabs">${[["","Tümü"],["sildi","Silmeler"],["staff","Personel"],["tasks","Görevler"],["rooms","Odalar"]].map(([k,l])=>`<button class="tab ${k===logFilter?"on":""}" data-t="${k}">${l}</button>`).join("")}</div>`; },
+  after(){ document.querySelectorAll("#ktabs .tab").forEach(b => b.onclick = () => { logFilter = b.dataset.t; document.querySelectorAll("#ktabs .tab").forEach(x=>x.classList.toggle("on", x===b)); refresh(); }); },
+  live(){
+    let l = S.islemler;
+    if (logFilter === "sildi") l = l.filter(x => x.islem === "sildi");
+    else if (logFilter) l = l.filter(x => x.koleksiyon === logFilter);
+    return l.length ? l.map(x => `<div class="card li" style="padding:9px 12px"><div class="main"><b>${esc(x.kimAd || nameOf(x.kim))} <span style="font-weight:500">${esc(x.islem)}</span></b><span>${esc(KOLL_AD[x.koleksiyon]||x.koleksiyon)}${x.ozet?": "+esc(x.ozet):""}</span></div><span class="muted num" style="font-size:12px;white-space:nowrap">${fmtDT(x.zaman)}</span></div>`).join("") : `<div class="empty">Kayıt yok.</div>`;
+  }
 };
 
 /* ======================= LİSTE YÜKLEME (PDF / metin) ======================= */
@@ -1312,15 +1499,18 @@ function previewRooms(items){
 }
 
 /* ======================= TELEFON: geri tuşu ve bildirimler ======================= */
-let LN = null, AppP = null;
+let LN = null, AppP = null, FSys = null, ShareP = null;
 const isNative = () => !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform());
 function initNative(){
   if (!isNative() || !window.capacitorExports) return;
   try {
     LN = capacitorExports.registerPlugin("LocalNotifications");
     AppP = capacitorExports.registerPlugin("App");
+    FSys = capacitorExports.registerPlugin("Filesystem");
+    ShareP = capacitorExports.registerPlugin("Share");
+    LN.createChannel({id:"hotelplus", name:"HotelPlus bildirimleri", description:"Görev, gecikme ve sohbet", importance:5, visibility:1, sound:"dit.wav", vibration:true, lights:true, lightColor:"#D9A426"}).catch(()=>{});
     AppP.addListener("backButton", () => {
-      if ($("#sh")) closeSheet();
+      if ($("#sh")) { if (!sheetLocked) closeSheet(); }
       else if (mode !== "login" && current !== "home") go("home");
       else AppP.minimizeApp();
     });
@@ -1330,12 +1520,24 @@ function initNative(){
 }
 async function askNotifyPermission(){ if (!LN){ try { if ("Notification" in window && Notification.permission === "default") Notification.requestPermission(); } catch(e){} return; } try { const p = await LN.checkPermissions(); if (p.display !== "granted") await LN.requestPermissions(); } catch(e){} }
 function nid(s){ let h = 7; for (const ch of s) h = (h*31 + ch.charCodeAt(0)) | 0; return (Math.abs(h) % 2000000000) + 1; }
-function notifyNow(title, body){ toast(title + ": " + body); if (!LN){ try { if ("Notification" in window && Notification.permission === "granted" && document.hidden) new Notification(title, {body, icon:"icons/icon-192.png"}); } catch(e){} return; } try { LN.schedule({notifications:[{id:nid("n"+Date.now()+Math.random()), title, body}]}); } catch(e){} }
-function onTaskChanges(snap){
-  if (firstTasks){ firstTasks = false; return; }
+let actx = null;
+function unlockAudio(){ try { if (!actx) actx = new (window.AudioContext || window.webkitAudioContext)(); if (actx.state === "suspended") actx.resume(); } catch(e){} }
+document.addEventListener("pointerdown", unlockAudio, {passive:true});
+function beep(){
+  try { unlockAudio(); if (!actx) return; const t0 = actx.currentTime;
+    [[0,1046],[0.16,1318]].forEach(([dt,f]) => { const o = actx.createOscillator(), g = actx.createGain(); o.type = "sine"; o.frequency.value = f; g.gain.setValueAtTime(0.0001, t0+dt); g.gain.exponentialRampToValueAtTime(0.35, t0+dt+0.01); g.gain.exponentialRampToValueAtTime(0.0001, t0+dt+0.12); o.connect(g); g.connect(actx.destination); o.start(t0+dt); o.stop(t0+dt+0.13); });
+    if (navigator.vibrate) navigator.vibrate([60,60,60]);
+  } catch(e){}
+}
+function notifyNow(title, body){ toast(title + ": " + body); if (!LN || !document.hidden) beep(); if (!LN){ try { if ("Notification" in window && Notification.permission === "granted" && document.hidden) new Notification(title, {body, icon:"icons/icon-192.png"}); } catch(e){} return; } if (!document.hidden) return; try { LN.schedule({notifications:[{id:nid("n"+Date.now()+Math.random()), title, body, channelId:"hotelplus", sound:"dit.wav"}]}); } catch(e){} }
+const notifiedKeys = new Set();
+function onTaskChanges(snap, i){
+  if (!firstTasks[i]){ firstTasks[i] = true; return; }
   snap.docChanges().forEach(ch => {
     if (ch.doc.metadata && ch.doc.metadata.hasPendingWrites) return;
     const t = {id:ch.doc.id, ...ch.doc.data()}; if (t.durum === "done") return;
+    const key = ch.type + ":" + t.id + ":" + (t.atanan||"");
+    if (notifiedKeys.has(key)) return; notifiedKeys.add(key);
     const prev = S.tasks.find(x=>x.id===t.id);
     if (ch.type === "added" && t.olusturan !== meId){
       if (t.atanan === meId) notifyNow("Sana yeni görev", `${t.ad} · ${t.konum}`);
@@ -1363,7 +1565,7 @@ async function syncAlarms(){
     const cancel = pend.filter(id => !wantIds.has(id));
     if (cancel.length) await LN.cancel({notifications: cancel.map(id=>({id}))});
     const add = top.filter(w => !pend.includes(w.id));
-    if (add.length) await LN.schedule({notifications: add.map(w => ({id:w.id, title:w.title, body:w.body, schedule:{at:new Date(w.at), allowWhileIdle:true}}))});
+    if (add.length) await LN.schedule({notifications: add.map(w => ({id:w.id, title:w.title, body:w.body, channelId:"hotelplus", sound:"dit.wav", schedule:{at:new Date(w.at), allowWhileIdle:true}}))});
   } catch(e){}
 }
 async function cancelAllAlarms(){ if (!LN) return; try { const p = (await LN.getPending()).notifications||[]; if (p.length) await LN.cancel({notifications:p.map(n=>({id:n.id}))}); } catch(e){} }
