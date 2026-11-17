@@ -167,6 +167,8 @@ form.f{display:flex;flex-direction:column;gap:10px}
 <script>
 /* ======================= AYARLAR (buradan değiştirilebilir) ======================= */
 const APP_ADI = "HotelPlus";
+const APP_VERSION = 6;   // her yayında 1 artırılır; telefonlarda "Güncelle" bunu karşılaştırır
+const WEB_ADRES = "https://hknkaradogan-cpu.github.io/hotelplus/";
 const OTEL_ADI = "Otel";
 const DEPARTMANLAR = ["Yönetim","Resepsiyon","Kat Hizmetleri","Teknik Servis","Yiyecek & İçecek","Spa","Güvenlik","Muhasebe","Satış & Rezervasyon","İnsan Kaynakları","Animasyon","Diğer"];
 const IK = "İnsan Kaynakları";
@@ -364,11 +366,13 @@ function refresh(){
   const view = VIEWS[current]; const live = $("#live");
   if (!view || !live) return;
   let pre = "";
+  pre += updateBanner();
   if (mode === "demo") pre += `<div class="banner">Örnek verilerle çalışıyor (Firebase bağlı değil). Değişiklikler kaydedilmez.</div>`;
   if (loadNote) pre += `<div class="banner">${esc(loadNote)}</div>`;
   if (mode === "loading" && !loadNote) pre += `<div class="empty">Yükleniyor…</div>`;
   live.innerHTML = pre + (mode === "loading" ? "" : view.live());
   if (view.bind) view.bind();
+  bindUpdate();
 }
 function renderTop(){
   if (mode === "login") return;
@@ -479,6 +483,7 @@ function renderLogin(){
     <div class="fld"><label for="lU">Telefon numarası</label><input id="lU" type="tel" inputmode="tel" autocomplete="username" placeholder="05xx xxx xx xx" required></div>
     <div class="fld"><label for="lP">Şifre</label><input id="lP" type="password" autocomplete="current-password" required></div>
     ${loginErr?`<div class="banner" style="background:var(--bad-soft)">${esc(loginErr)}</div>`:""}
+    ${updateBanner()}
     <button class="btn go block" id="lGo">Giriş yap</button>
     <div class="row2"><button type="button" class="btn" id="lReg">Üye ol</button><button type="button" class="btn" id="lFor">Şifremi unuttum</button></div></form>
     <button type="button" class="btn sm" id="lSetup" style="align-self:center">İlk kurulum (genel müdür)</button></div>`;
@@ -494,6 +499,7 @@ function renderLogin(){
       }
       await firebase.auth().signInWithEmailAndPassword(email, $("#lP").value);
     } catch(err){ loginErr = authMsg(err); renderLogin(); } };
+  bindUpdate();
   $("#lReg").onclick = registerSheet;
   $("#lFor").onclick = forgotSheet;
   $("#lSetup").onclick = setupSheet;
@@ -1361,6 +1367,37 @@ async function syncAlarms(){
   } catch(e){}
 }
 async function cancelAllAlarms(){ if (!LN) return; try { const p = (await LN.getPending()).notifications||[]; if (p.length) await LN.cancel({notifications:p.map(n=>({id:n.id}))}); } catch(e){} }
+
+/* ======================= GÜNCELLEME KONTROLÜ ======================= */
+let remoteVer = null;
+async function checkUpdate(){
+  try {
+    const r = await fetch(WEB_ADRES + "version.json?t=" + Date.now(), {cache:"no-store"});
+    if (!r.ok) return;
+    const v = await r.json();
+    if (v && v.version > APP_VERSION){ const was = remoteVer; remoteVer = v; if (!was){ if (mode === "login") renderLogin(); else refresh(); } }
+  } catch(e){}
+}
+function updateBanner(){
+  if (!remoteVer) return "";
+  return `<div class="banner" style="background:var(--info-soft);display:flex;gap:10px;align-items:center"><div style="flex:1"><b>Yeni sürüm hazır</b>${remoteVer.notlar?`<div style="font-size:12.5px">${esc(remoteVer.notlar)}</div>`:""}</div><button class="btn go sm" id="updBtn" type="button">Güncelle</button></div>`;
+}
+function bindUpdate(){
+  const b = document.getElementById("updBtn"); if (!b) return;
+  b.onclick = async () => {
+    if (isNative()){
+      sheet("Güncelleme", `<div>Yeni sürüm indirilecek. İndirme bitince bildirimden ya da İndirilenler'den <b>HotelPlus.apk</b> dosyasına dokunup <b>Güncelle</b>'ye bas. Verilerin silinmez.</div><button class="btn go block" id="updGo">İndir</button>`, () => {
+        $("#updGo").onclick = () => { closeSheet(); location.href = WEB_ADRES + (remoteVer.apk || "HotelPlus.apk") + "?v=" + remoteVer.version; };
+      });
+    } else {
+      try { if (window.caches){ const ks = await caches.keys(); await Promise.all(ks.map(k=>caches.delete(k))); } } catch(e){}
+      location.reload();
+    }
+  };
+}
+setTimeout(checkUpdate, 3000);
+setInterval(checkUpdate, 10*60*1000);
+document.addEventListener("visibilitychange", () => { if (!document.hidden) checkUpdate(); });
 
 /* ======================= ÖRNEK VERİ (Firebase yokken) ======================= */
 function demoData(){
