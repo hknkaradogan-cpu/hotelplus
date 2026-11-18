@@ -168,7 +168,7 @@ form.f{display:flex;flex-direction:column;gap:10px}
 <script>
 /* ======================= AYARLAR (buradan değiştirilebilir) ======================= */
 const APP_ADI = "HotelPlus";
-const APP_VERSION = 12;   // her yayında 1 artırılır; telefonlarda "Güncelle" bunu karşılaştırır
+const APP_VERSION = 13;   // her yayında 1 artırılır; telefonlarda "Güncelle" bunu karşılaştırır
 const WEB_ADRES = "https://hknkaradogan-cpu.github.io/hotelplus/";
 const OTEL_ADI = "Otel";
 const VARSAYILAN_DEPARTMANLAR = ["Yönetim","Bilgi İşlem (IT)","İnsan Kaynakları","Resepsiyon","Kat Hizmetleri","Çamaşırhane","Teknik Servis","Mutfak","Restoran","Bulaşıkhane","Yiyecek & İçecek","Satın Alma","Spa","Güvenlik","Muhasebe","Satış & Rezervasyon","Animasyon","Diğer"];
@@ -181,11 +181,11 @@ const ROL_SIRA = {gm:0, mudur:1, sef:2, personel:3};
 const KIRMIZI_EK_ORAN = 1, KIRMIZI_EK_MIN_DK = 30;
 const DEPT_ANAHTAR = {
   "Yönetim":["genel müdür","genel mudur","müdür yardımcısı","otel müdürü","direktör","direktor"],
-  "Resepsiyon":["resepsiyon","ön büro","on buro","front","konsiyerj","concierge","bellboy","bagaj","gece müdürü"],
+  "Resepsiyon":["resepsiyon","ön büro","on buro","front","konsiyerj","concierge","bellboy","bagaj","gece müdürü","misafir ilişki","guest relation"],
   "Kat Hizmetleri":["kat ","kat hiz","housekeeping","temizlik","oda görevlisi","meydancı","meydanci"],
   "Çamaşırhane":["çamaşır","camasir","laundry","ütü"],
   "Bulaşıkhane":["bulaşık","bulasik","steward"],
-  "Mutfak":["mutfak","aşçı","asci","şef aşçı","pastane","pasta","kasap","soğuk büfe"],
+  "Mutfak":["mutfak","aşçı","asci","şef aşçı","pastane","pasta","kasap","soğuk büfe","chef","commis"],
   "Restoran":["restoran","garson","komi","maitre","şef garson"],
   "Satın Alma":["satın alma","satin alma","satınalma","depo sorumlusu","ambar"],
   "Bilgi İşlem (IT)":["bilgi işlem","bilgi islem","it ","bt ","sistem","network","yazılım"],
@@ -195,10 +195,10 @@ const DEPT_ANAHTAR = {
   "Güvenlik":["güvenlik","guvenlik","security"],
   "Muhasebe":["muhasebe","finans","kasa","gelir"],
   "Satış & Rezervasyon":["satış","satis","rezervasyon","pazarlama"],
-  "İnsan Kaynakları":["insan kaynak","ik uzman","ik müdür","personel müdür"],
+  "İnsan Kaynakları":["insan kaynak","ik uzman","ik müdür","personel müdür","özlük","bordro"],
   "Animasyon":["animasyon","animatör","animator"]
 };
-const ROL_ANAHTAR = {gm:["genel müdür","genel mudur","otel müdürü","general manager"], mudur:["müdür","mudur","manager","direktör","direktor"], sef:["şef","sef ","sorumlu","supervisor","amir","başkan"]};
+const ROL_ANAHTAR = {gm:["genel müdür","genel mudur","otel müdürü","general manager"], mudur:["müdür","mudur","manager","direktör","direktor","executive chef"], sef:["şef","sef ","sorumlu","supervisor","amir","başkan","chef"]};
 const GOREV_SABLONLARI = [
   {ad:"Klima arızası", tur:"ariza", dept:"Teknik Servis", dk:45},
   {ad:"Elektrik / priz arızası", tur:"ariza", dept:"Teknik Servis", dk:45},
@@ -1952,7 +1952,8 @@ function bulkAccountSheet(){
       <div class="fld"><label for="baF2">Listeyi dosyadan al (PDF, Excel, CSV)</label><input type="file" id="baF2" accept=".pdf,.xlsx,.xls,.csv,.txt,application/pdf,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel,text/csv,text/plain"><span class="hint" id="baFH">Dosyadaki isimler aşağıdaki kutuya eklenir; kontrol edip düzeltebilirsin.</span></div>
       <div class="fld"><label for="baL">İsim listesi (her satıra bir kişi)</label><textarea id="baL" style="min-height:140px" placeholder="Her satıra bir isim yaz ya da yukarıdan dosya seç"></textarea></div>
       ${without.length ? `<label class="switch" for="baW"><span><b>Hesabı olmayan ${without.length} kayıtlı personele de aç</b><br><span class="muted" style="font-size:12.5px">PDF'den yüklediğin ama hesap açmadığın kişiler</span></span><input type="checkbox" id="baW"></label>` : ""}
-      <div class="row2"><div class="fld"><label for="baDep">Departmanı yazılmayanlar</label><select id="baDep">${deptOptions(myDept() && !isGM() && !isHR() ? myDept() : "Resepsiyon")}</select></div><div class="fld"><label for="baR">Rütbe</label><select id="baR">${rolOptions("personel", isGM() || isHR())}</select></div></div>
+      <div class="row2"><div class="fld"><label for="baDep">Departman</label><select id="baDep"><option value="">Otomatik: listeye ya da unvana göre</option>${deptOptions("")}</select></div><div class="fld"><label for="baR">Rütbe</label><select id="baR"><option value="">Otomatik: unvana göre</option>${rolOptions("", isGM() || isHR())}</select></div></div>
+      <div class="hint">Otomatikte: listede departman yazıyorsa o kullanılır; yoksa unvandan bulunur (Garson → Restoran, Kat Görevlisi → Kat Hizmetleri, Müdür → Departman Müdürü). Bulunamayanları önizlemede sen seçersin. Hepsini tek departmana atamak için listeden departman seç.</div>
       <button type="button" class="btn go block" id="baP">Önizle</button></form><div id="baOut" class="list"></div>`, () => {
     $("#baH").addEventListener("input", () => { $("#baD").value = domainFromHotel($("#baH").value); });
     $("#baF2").onchange = async e => { const f = e.target.files[0]; if (!f) return; $("#baFH").textContent = "Dosya okunuyor…";
@@ -1967,15 +1968,27 @@ function bulkAccountSheet(){
       parseStaff($("#baL").value).forEach(x => {
         const ex = S.staff.find(s => trLower(s.ad) === trLower(x.ad) || (x.tel && s.tel === x.tel));
         if (ex && ex.uid) return;
-        const dept = high ? (x.dept && x.dept !== "Diğer" ? x.dept : defDept) : myDept();
-        rows.push({ex, ad:x.ad, tel:x.tel || (ex && ex.tel) || "", unvan:x.unvan, dept: ex ? ex.dept : dept, rol: ex ? ex.rol : (x.rol !== "personel" && high ? x.rol : defRol)});
+        let dept, kaynak;
+        if (!high){ dept = myDept(); kaynak = "senin departmanın"; }
+        else if (ex){ dept = ex.dept; kaynak = "kayıtlı"; }
+        else if (defDept){ dept = defDept; kaynak = "seçtiğin"; }
+        else { dept = x.dept; kaynak = x.deptKaynak === "liste" ? "listeden" : x.deptKaynak === "unvan" ? "unvandan" : "bulunamadı"; }
+        let rol = ex ? ex.rol : (defRol || x.rol || "personel");
+        if (!high && ["gm","mudur"].includes(rol)) rol = "sef";
+        rows.push({ex, ad:x.ad, tel:x.tel || (ex && ex.tel) || "", unvan:x.unvan, dept, kaynak, rol});
       });
-      if ($("#baW") && $("#baW").checked) without.forEach(s => { if (!rows.some(r => r.ex && r.ex.id === s.id)) rows.push({ex:s, ad:s.ad, tel:s.tel||"", unvan:s.unvan||"", dept:s.dept, rol:s.rol||"personel"}); });
+      if ($("#baW") && $("#baW").checked) without.forEach(s => { if (!rows.some(r => r.ex && r.ex.id === s.id)) rows.push({ex:s, ad:s.ad, tel:s.tel||"", unvan:s.unvan||"", dept:s.dept, kaynak:"kayıtlı", rol:s.rol||"personel"}); });
       rows.forEach(r => { r.kullanici = userFor(r.ad, dom, taken); r.sifre = genPw(); });
       if (!rows.length){ $("#baOut").innerHTML = `<div class="empty">Hesap açılacak kişi bulunamadı. Listede isim yok ya da hepsinin hesabı zaten var.</div>`; return; }
-      $("#baOut").innerHTML = `<div class="banner" style="background:var(--info-soft)">${rows.length} kişiye hesap açılacak. Kontrol et, sonra "Hesapları oluştur"a bas.</div>`
-        + rows.map(r => `<div class="card" style="padding:9px 12px;gap:2px"><b>${esc(r.ad)}</b><span class="muted" style="font-size:12.5px">${esc(r.dept)} · ${esc(ROLLER[r.rol]||"")}${r.tel?" · "+esc(fmtTel(r.tel)):""}</span><span class="num" style="font-size:13px">${esc(r.kullanici)} · şifre <b>${esc(r.sifre)}</b></span></div>`).join("")
+      const miss = rows.filter(r => r.dept === "Diğer" && r.kaynak === "bulunamadı").length;
+      const sel = "padding:7px;border-radius:8px;border:1px solid var(--line);background:var(--surface);width:100%";
+      $("#baOut").innerHTML = `<div class="banner" style="background:var(--info-soft)">${rows.length} kişiye hesap açılacak.${miss?` <b>${miss} kişinin departmanı bulunamadı</b>, aşağıda kırmızı olanları seç.`:""} Kontrol et, sonra "Hesapları oluştur"a bas.</div>`
+        + rows.map((r,i) => `<div class="card" style="padding:9px 12px;gap:6px${r.kaynak==="bulunamadı"?";border-color:var(--bad)":""}"><div><b>${esc(r.ad)}</b>${r.unvan?` <span class="muted" style="font-size:12.5px">· ${esc(r.unvan)}</span>`:""}</div>
+          <div class="row2"><select data-bi="${i}" data-bk="dept" aria-label="Departman" style="${sel}" ${high && !r.ex ? "" : "disabled"}>${deptOptions(r.dept)}</select><select data-bi="${i}" data-bk="rol" aria-label="Rütbe" style="${sel}" ${r.ex ? "disabled" : ""}>${rolOptions(r.rol, high)}</select></div>
+          <span class="hint">Departman: ${esc(r.kaynak)}${r.tel?" · "+esc(fmtTel(r.tel)):""}</span>
+          <span class="num" style="font-size:13px;word-break:break-all">${esc(r.kullanici)} · şifre <b>${esc(r.sifre)}</b></span></div>`).join("")
         + `<button class="btn go block" id="baGo">${rows.length} hesabı oluştur</button>`;
+      $("#baOut").querySelectorAll("select[data-bi]").forEach(el => el.onchange = () => { const r = rows[+el.dataset.bi]; r[el.dataset.bk] = el.value; if (el.dataset.bk === "dept"){ r.kaynak = "seçtiğin"; el.closest(".card").style.borderColor = ""; } });
       $("#baGo").onclick = () => runBulk(rows, dom, $("#baH").value.trim());
     };
   });
@@ -2141,7 +2154,15 @@ async function readPdf(file){
   for (let i=1; i<=doc.numPages; i++){
     const c = await (await doc.getPage(i)).getTextContent();
     let lastY = null;
-    for (const it of c.items){ const y = it.transform ? Math.round(it.transform[5]) : null; if (lastY!==null && y!==null && Math.abs(y-lastY)>2) text += "\n"; else if (text && !text.endsWith("\n")) text += "  "; text += it.str; lastY = y; }
+    let lastEnd = null;
+    for (const it of c.items){
+      if (!it.str && !it.hasEOL) continue;
+      const y = it.transform ? Math.round(it.transform[5]) : null, x = it.transform ? it.transform[4] : null, fs = it.transform ? Math.abs(it.transform[0]) || 10 : 10;
+      if (lastY !== null && y !== null && Math.abs(y - lastY) > 2){ text += "\n"; lastEnd = null; }
+      if (!it.str.trim()){ if (it.str.length && text && !text.endsWith("\n")){ const w = it.width || 0; if (w > fs * 1.2){ text = text.replace(/ +$/, "") + "  "; } else if (!text.endsWith(" ")) text += " "; } lastY = y; lastEnd = (x !== null && it.width != null) ? x + it.width : lastEnd; continue; }
+      else if (lastEnd !== null && x !== null && text && !text.endsWith("\n")){ const gap = x - lastEnd; if (gap > fs * 1.2) text += "  "; else if (gap > fs * 0.15 && !text.endsWith(" ") && !it.str.startsWith(" ")) text += " "; }
+      text += it.str; lastY = y; lastEnd = (x !== null && it.width != null) ? x + it.width : null;
+    }
     text += "\n";
   }
   return text.replace(/[ \t]{3,}/g,"  ").trim();
@@ -2154,6 +2175,7 @@ function guessDept(line){
 }
 function guessRol(line){
   const l = " " + trLower(line) + " ";
+  if (/yardımcı|yardimci|assistant/.test(l)) return "mudur";
   for (const r of ["gm","mudur","sef"]) if (ROL_ANAHTAR[r].some(k=>l.includes(k))) return r;
   return "personel";
 }
@@ -2165,7 +2187,9 @@ function parseStaff(text){
     const parts = rest.split(/\t|;|,|\s[-–|]\s|\s{2,}/).map(x=>x.trim()).filter(Boolean);
     const ad = (parts[0]||"").replace(/\s+/g," ");
     const unvan = parts.slice(1).filter(p => !DEPARTMANLAR_GET().some(d=>trLower(d)===trLower(p))).join(", ");
-    return {ad, unvan, tel: telOk(tel)?tel:"", dept: guessDept(line), rol: guessRol(unvan || line)};
+    const fromList = DEPARTMANLAR_GET().find(d => d !== "Diğer" && parts.slice(1).some(p => trLower(p) === trLower(d)));
+    const dGuess = fromList || (unvan && guessDept(unvan) !== "Diğer" ? guessDept(unvan) : guessDept(line));
+    return {ad, unvan, tel: telOk(tel)?tel:"", dept: dGuess, deptKaynak: fromList ? "liste" : (dGuess !== "Diğer" ? "unvan" : ""), rol: guessRol(unvan || line)};
   }).filter(x=>x.ad && x.ad.split(" ").length<=5 && !/^\d+$/.test(x.ad));
 }
 function importSheet(kind){
