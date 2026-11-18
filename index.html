@@ -167,7 +167,7 @@ form.f{display:flex;flex-direction:column;gap:10px}
 <script>
 /* ======================= AYARLAR (buradan değiştirilebilir) ======================= */
 const APP_ADI = "HotelPlus";
-const APP_VERSION = 10;   // her yayında 1 artırılır; telefonlarda "Güncelle" bunu karşılaştırır
+const APP_VERSION = 11;   // her yayında 1 artırılır; telefonlarda "Güncelle" bunu karşılaştırır
 const WEB_ADRES = "https://hknkaradogan-cpu.github.io/hotelplus/";
 const OTEL_ADI = "Otel";
 const VARSAYILAN_DEPARTMANLAR = ["Yönetim","Bilgi İşlem (IT)","İnsan Kaynakları","Resepsiyon","Kat Hizmetleri","Çamaşırhane","Teknik Servis","Mutfak","Restoran","Bulaşıkhane","Yiyecek & İçecek","Satın Alma","Spa","Güvenlik","Muhasebe","Satış & Rezervasyon","Animasyon","Diğer"];
@@ -330,9 +330,9 @@ const isAdmin = () => !!(authUser && authUser.email === "yonetici@" + EMAIL_DOMA
 const myRol = () => (mode === "demo" || isAdmin()) ? "gm" : ((me() && me().rol) || (member && member.rol) || "personel");
 const myDept = () => (me() && me().dept) || (member && member.dept) || "";
 const isGM = () => myRol() === "gm";
-const isHR = () => ["gm","mudur"].includes(myRol()) && (myDept() === IK || myDept() === IT);
-const canSettings = () => isGM() || (["gm","mudur","sef"].includes(myRol()) && myDept() === IT);
-const isManager = () => isGM() || myRol() === "mudur";
+const isHR = () => (["gm","mudur"].includes(myRol()) && myDept() === IK) || myDept() === IT;
+const canSettings = () => isGM() || myDept() === IT;
+const isManager = () => isGM() || myRol() === "mudur" || myDept() === IT;
 const managesDept = d => isGM() || isHR() || (myRol() === "mudur" && myDept() === d);
 const canStaffAdmin = () => isGM() || isHR() || myRol() === "mudur";
 const rolSort = (a,b) => (ROL_SIRA[a.rol]??9) - (ROL_SIRA[b.rol]??9) || String(a.ad).localeCompare(String(b.ad), "tr");
@@ -495,7 +495,7 @@ async function init(){
 }
 let firstTasks = {}, firstChat = true, migrated = false, backupChecked = false;
 const gmM = () => isAdmin() || (member && member.rol === "gm");
-const mgrM = () => gmM() || (member && member.rol === "mudur");
+const mgrM = () => gmM() || (member && (member.rol === "mudur" || member.dept === IT));
 function subscribe(){
   const timer = setTimeout(()=>{ if(mode==="loading"){ loadNote = "Veriler yüklenemedi; internet gelince otomatik güncellenecek."; mode = "live"; refresh(); } }, 10000);
   const fail = c => err => { if (mode==="loading"){ mode = "live"; clearTimeout(timer); } if (!MANAGER_ONLY.includes(c) && c !== "guestTel" && c !== "islemler") loadNote = "Bazı veriler okunamadı. İnternetini kontrol et."; refresh(); };
@@ -991,12 +991,12 @@ VIEWS.personel = {
   shell(){
     const wide = isGM() || isHR();
     if (!wide) staffDept = myDept();
-    return `<button class="btn go block" id="pBulk">İsim listesinden toplu hesap aç</button><div class="row2"><button class="btn" id="pImp">PDF'den yükle</button><button class="btn" id="pAdd">Personel ekle</button></div><button class="btn danger" id="pSel">Seçerek sil</button>
+    return `${canBulk()?`<button class="btn go block" id="pBulk">İsim listesinden toplu hesap aç</button>`:""}<div class="row2"><button class="btn" id="pImp">PDF'den yükle</button><button class="btn" id="pAdd">Personel ekle</button></div><button class="btn danger" id="pSel">Seçerek sil</button>
       ${wide?`<div class="fld"><select id="pDept" aria-label="Departman">${deptOptions(staffDept, true)}</select></div>`:""}`;
   },
   after(){
     $("#pImp").onclick = () => importSheet("staff");
-    $("#pBulk").onclick = bulkAccountSheet;
+    if ($("#pBulk")) $("#pBulk").onclick = bulkAccountSheet;
     $("#pAdd").onclick = () => staffSheet(null);
     $("#pSel").onclick = () => { staffSel = staffSel ? null : new Set(); $("#pSel").textContent = staffSel ? "Seçimi bitir" : "Seçerek sil"; if (!staffSel) document.querySelectorAll(".bulkbar").forEach(n=>n.remove()); refresh(); };
     if ($("#pDept")) $("#pDept").onchange = () => { staffDept = $("#pDept").value; refresh(); };
@@ -1920,17 +1920,36 @@ function userFor(ad, dom, taken){
   while (taken.has(u)) u = base + (i++) + "@" + dom;
   taken.add(u); return u;
 }
+let xlsxReady = null;
+function xlsxLib(){ if (!xlsxReady) xlsxReady = loadScript("vendor/xlsx.full.min.js").then(() => window.XLSX).catch(e => { xlsxReady = null; throw e; }); return xlsxReady; }
+async function readListFile(f){
+  const name = (f.name||"").toLowerCase();
+  if (name.endsWith(".pdf") || f.type === "application/pdf") return readPdf(f);
+  if (/\.xlsx?$/.test(name) || /spreadsheet|excel/.test(f.type||"")){
+    const X = await xlsxLib();
+    const wb = X.read(new Uint8Array(await f.arrayBuffer()), {type:"array"});
+    const out = [];
+    wb.SheetNames.forEach(sn => X.utils.sheet_to_json(wb.Sheets[sn], {header:1, raw:false, defval:""}).forEach(row => { const cells = row.map(c => String(c).trim()).filter(Boolean); if (cells.length) out.push(cells.join(" - ")); }));
+    return out.join("\n");
+  }
+  return (await f.text()).split(/\r?\n/).map(l => l.split(/[;\t,]/).map(c => c.trim()).filter(Boolean).join(" - ")).join("\n");
+}
+const canBulk = () => mode === "demo" || isAdmin() || myDept() === IT;
 function bulkAccountSheet(){
   const hotel = (AYAR.otel && AYAR.otel.ad) || "";
   const without = S.staff.filter(s => !s.uid && s.durum !== "pasif" && managesDept(s.dept));
   sheet("Toplu hesap aç", `<div class="hint">İsim listesini yapıştır; her isme otomatik kullanıcı adı (ad.soyad@otel) ve şifre oluşturulur. Satırda departman ve telefon da yazabilirsin: <i>Hakan Karadoğan - Resepsiyon - 0532 111 22 33</i></div>
     <form class="f" id="baF">
-      <div class="row2"><div class="fld"><label for="baH">Otel adı</label><input id="baH" value="${esc(hotel)}" placeholder="Crowne Plaza Florya"></div><div class="fld"><label for="baD">Kullanıcı adı uzantısı</label><input id="baD" value="${esc(AYAR.girisDomain || domainFromHotel(hotel))}" autocapitalize="none" spellcheck="false" placeholder="crowneplazaflorya.com"></div></div>
-      <div class="fld"><label for="baL">İsim listesi (her satıra bir kişi)</label><textarea id="baL" style="min-height:140px" placeholder="Hakan Karadoğan&#10;Ayşe Yılmaz - Kat Hizmetleri&#10;Mehmet Demir - Teknik Servis - 0532 111 22 33"></textarea></div>
+      <div class="row2"><div class="fld"><label for="baH">Otel adı</label><input id="baH" value="${esc(hotel)}" placeholder="Otelin adını yaz"></div><div class="fld"><label for="baD">Kullanıcı adı uzantısı</label><input id="baD" value="${esc(AYAR.girisDomain || domainFromHotel(hotel))}" autocapitalize="none" spellcheck="false" placeholder="oteladi.com"></div></div>
+      <div class="fld"><label for="baF2">Listeyi dosyadan al (PDF, Excel, CSV)</label><input type="file" id="baF2" accept=".pdf,.xlsx,.xls,.csv,.txt,application/pdf,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel,text/csv,text/plain"><span class="hint" id="baFH">Dosyadaki isimler aşağıdaki kutuya eklenir; kontrol edip düzeltebilirsin.</span></div>
+      <div class="fld"><label for="baL">İsim listesi (her satıra bir kişi)</label><textarea id="baL" style="min-height:140px" placeholder="Her satıra bir isim yaz ya da yukarıdan dosya seç"></textarea></div>
       ${without.length ? `<label class="switch" for="baW"><span><b>Hesabı olmayan ${without.length} kayıtlı personele de aç</b><br><span class="muted" style="font-size:12.5px">PDF'den yüklediğin ama hesap açmadığın kişiler</span></span><input type="checkbox" id="baW"></label>` : ""}
       <div class="row2"><div class="fld"><label for="baDep">Departmanı yazılmayanlar</label><select id="baDep">${deptOptions(myDept() && !isGM() && !isHR() ? myDept() : "Resepsiyon")}</select></div><div class="fld"><label for="baR">Rütbe</label><select id="baR">${rolOptions("personel", isGM() || isHR())}</select></div></div>
       <button type="button" class="btn go block" id="baP">Önizle</button></form><div id="baOut" class="list"></div>`, () => {
-    $("#baH").addEventListener("input", () => { if (!AYAR.girisDomain) $("#baD").value = domainFromHotel($("#baH").value); });
+    $("#baH").addEventListener("input", () => { $("#baD").value = domainFromHotel($("#baH").value); });
+    $("#baF2").onchange = async e => { const f = e.target.files[0]; if (!f) return; $("#baFH").textContent = "Dosya okunuyor…";
+      try { const text = await readListFile(f); const n = text.split("\n").filter(x => x.trim()).length; $("#baL").value = ($("#baL").value.trim() ? $("#baL").value.trim() + "\n" : "") + text; $("#baFH").textContent = `${n} satır eklendi. Kontrol edip Önizle'ye bas.`; }
+      catch(er){ $("#baFH").textContent = "Dosya okunamadı. PDF taranmış resimse ya da Excel şifreliyse listeyi elle yapıştır."; } };
     $("#baP").onclick = () => {
       const dom = trLower($("#baD").value.trim().replace(/^@/, ""));
       if (!/^[a-z0-9.-]+\.[a-z]{2,}$/.test(dom)){ toast("Uzantı crowneplazaflorya.com şeklinde olmalı. Otel adını yaz, kendiliğinden oluşur."); return; }
