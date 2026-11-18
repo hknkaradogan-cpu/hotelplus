@@ -168,7 +168,7 @@ form.f{display:flex;flex-direction:column;gap:10px}
 <script>
 /* ======================= AYARLAR (buradan değiştirilebilir) ======================= */
 const APP_ADI = "HotelPlus";
-const APP_VERSION = 15;   // her yayında 1 artırılır; telefonlarda "Güncelle" bunu karşılaştırır
+const APP_VERSION = 16;   // her yayında 1 artırılır; telefonlarda "Güncelle" bunu karşılaştırır
 const WEB_ADRES = "https://hknkaradogan-cpu.github.io/hotelplus/";
 const OTEL_ADI = "Otel";
 const VARSAYILAN_DEPARTMANLAR = ["Yönetim","Bilgi İşlem (IT)","İnsan Kaynakları","Resepsiyon","Kat Hizmetleri","Çamaşırhane","Teknik Servis","Mutfak","Restoran","Bulaşıkhane","Yiyecek & İçecek","Satın Alma","Spa","Güvenlik","Muhasebe","Satış & Rezervasyon","Animasyon","Diğer"];
@@ -756,10 +756,10 @@ async function giveAccess(st, pw, kullanici){
   for (const k of [st.tel, kullanici, st.kullanici]) if (k) { try { await col("sifreTalepleri").doc(k).delete(); } catch(e){} }
   logOp("şifre verdi", "staff", st.id, st);
 }
-function credMsg(st, kullanici, pw){ return `Kullanıcı adı: ${kullanici}\nŞifre: ${pw}`; }
+function credMsg(st, kullanici, pw){ return `HotelPlus - otel personel uygulaması\n\nKullanıcı adı: ${kullanici}\nŞifre: ${pw}\n\nUygulamayı indir (Android / iPhone / bilgisayar):\n${WEB_ADRES}indir.html`; }
 async function shareText(text){
   try {
-    if (isNative() && ShareP){ await ShareP.share({text, dialogTitle:"Gönder"}); return; }
+    if (isNative() && ShareP){ await ShareP.share({title:"HotelPlus", text, dialogTitle:"Gönder"}); return; }
     if (navigator.share){ await navigator.share({text}); return; }
   } catch(e){ if (e && (e.name === "AbortError" || /cancel/i.test(e.message||""))) return; }
   copyText(text);
