@@ -167,7 +167,7 @@ form.f{display:flex;flex-direction:column;gap:10px}
 <script>
 /* ======================= AYARLAR (buradan değiştirilebilir) ======================= */
 const APP_ADI = "HotelPlus";
-const APP_VERSION = 9;   // her yayında 1 artırılır; telefonlarda "Güncelle" bunu karşılaştırır
+const APP_VERSION = 10;   // her yayında 1 artırılır; telefonlarda "Güncelle" bunu karşılaştırır
 const WEB_ADRES = "https://hknkaradogan-cpu.github.io/hotelplus/";
 const OTEL_ADI = "Otel";
 const VARSAYILAN_DEPARTMANLAR = ["Yönetim","Bilgi İşlem (IT)","İnsan Kaynakları","Resepsiyon","Kat Hizmetleri","Çamaşırhane","Teknik Servis","Mutfak","Restoran","Bulaşıkhane","Yiyecek & İçecek","Satın Alma","Spa","Güvenlik","Muhasebe","Satış & Rezervasyon","Animasyon","Diğer"];
@@ -671,6 +671,7 @@ function accountMenu(){
   sheet(esc(m ? m.ad : isAdmin() ? "Genel Müdür" : "Hesabım"), `
     <div class="muted">${esc(ROLLER[myRol()])}${myDept()?" · "+esc(myDept()):""}${m&&m.tel?" · "+esc(fmtTel(m.tel)):""}</div>
     ${m&&m.kullanici?`<div class="muted">Kullanıcı adı: ${esc(m.kullanici)}</div>`:""}
+    <div class="hint">Uygulama sürümü: 1.0.${APP_VERSION}</div>
     ${mode!=="demo"&&isGM()?`<button class="btn block" id="amPw">Şifremi değiştir</button>`:""}
     ${isAdmin()&&!m?`<button class="btn block" id="amProf">Bilgilerimi tamamla</button>`:""}
     ${mode!=="demo"?`<button class="btn danger block" id="amOut">Çıkış yap</button>`:""}`, () => {
@@ -701,7 +702,7 @@ async function secondaryAuth(){
   try { await sec.auth().setPersistence(firebase.auth.Auth.Persistence.NONE); } catch(e){}
   return sec.auth();
 }
-function domainOf(){ return trLower(String(AYAR.girisDomain || "otel.com").replace(/^@/,"").trim()) || "otel.com"; }
+function domainOf(){ return trLower(String(AYAR.girisDomain || domainFromHotel((AYAR.otel||{}).ad||"") || "otel.com").replace(/^@/,"").trim()) || "otel.com"; }
 function suggestUser(st){
   const parts = slugUser(st.ad).split(".").filter(Boolean);
   const base = (parts.length > 1 ? parts[0] + "." + parts[parts.length-1] : (parts[0] || "personel"));
@@ -990,11 +991,12 @@ VIEWS.personel = {
   shell(){
     const wide = isGM() || isHR();
     if (!wide) staffDept = myDept();
-    return `<div class="row2"><button class="btn go" id="pImp">PDF'den yükle</button><button class="btn" id="pAdd">Personel ekle</button></div><button class="btn danger" id="pSel">Seçerek sil</button>
+    return `<button class="btn go block" id="pBulk">İsim listesinden toplu hesap aç</button><div class="row2"><button class="btn" id="pImp">PDF'den yükle</button><button class="btn" id="pAdd">Personel ekle</button></div><button class="btn danger" id="pSel">Seçerek sil</button>
       ${wide?`<div class="fld"><select id="pDept" aria-label="Departman">${deptOptions(staffDept, true)}</select></div>`:""}`;
   },
   after(){
     $("#pImp").onclick = () => importSheet("staff");
+    $("#pBulk").onclick = bulkAccountSheet;
     $("#pAdd").onclick = () => staffSheet(null);
     $("#pSel").onclick = () => { staffSel = staffSel ? null : new Set(); $("#pSel").textContent = staffSel ? "Seçimi bitir" : "Seçerek sil"; if (!staffSel) document.querySelectorAll(".bulkbar").forEach(n=>n.remove()); refresh(); };
     if ($("#pDept")) $("#pDept").onchange = () => { staffDept = $("#pDept").value; refresh(); };
@@ -1906,6 +1908,83 @@ async function usageInfo(){
   const snap = await DB.collection("dosyalar").get();
   let bytes = 0, foto = 0, ses = 0; snap.docs.forEach(d => { const x = d.data(); bytes += x.boyut||0; if ((x.tur||"").startsWith("audio")) ses++; else foto++; });
   return {mb: bytes/1048576, foto, ses};
+}
+
+
+/* ======================= TOPLU HESAP AÇMA ======================= */
+const domainFromHotel = ad => { const d = slugUser(ad).replace(/[^a-z0-9]/g, ""); return d ? d + ".com" : ""; };
+function userFor(ad, dom, taken){
+  const parts = slugUser(ad).split(".").filter(Boolean);
+  const base = parts.length > 1 ? parts[0] + "." + parts[parts.length-1] : (parts[0] || "personel");
+  let u = base + "@" + dom, i = 2;
+  while (taken.has(u)) u = base + (i++) + "@" + dom;
+  taken.add(u); return u;
+}
+function bulkAccountSheet(){
+  const hotel = (AYAR.otel && AYAR.otel.ad) || "";
+  const without = S.staff.filter(s => !s.uid && s.durum !== "pasif" && managesDept(s.dept));
+  sheet("Toplu hesap aç", `<div class="hint">İsim listesini yapıştır; her isme otomatik kullanıcı adı (ad.soyad@otel) ve şifre oluşturulur. Satırda departman ve telefon da yazabilirsin: <i>Hakan Karadoğan - Resepsiyon - 0532 111 22 33</i></div>
+    <form class="f" id="baF">
+      <div class="row2"><div class="fld"><label for="baH">Otel adı</label><input id="baH" value="${esc(hotel)}" placeholder="Crowne Plaza Florya"></div><div class="fld"><label for="baD">Kullanıcı adı uzantısı</label><input id="baD" value="${esc(AYAR.girisDomain || domainFromHotel(hotel))}" autocapitalize="none" spellcheck="false" placeholder="crowneplazaflorya.com"></div></div>
+      <div class="fld"><label for="baL">İsim listesi (her satıra bir kişi)</label><textarea id="baL" style="min-height:140px" placeholder="Hakan Karadoğan&#10;Ayşe Yılmaz - Kat Hizmetleri&#10;Mehmet Demir - Teknik Servis - 0532 111 22 33"></textarea></div>
+      ${without.length ? `<label class="switch" for="baW"><span><b>Hesabı olmayan ${without.length} kayıtlı personele de aç</b><br><span class="muted" style="font-size:12.5px">PDF'den yüklediğin ama hesap açmadığın kişiler</span></span><input type="checkbox" id="baW"></label>` : ""}
+      <div class="row2"><div class="fld"><label for="baDep">Departmanı yazılmayanlar</label><select id="baDep">${deptOptions(myDept() && !isGM() && !isHR() ? myDept() : "Resepsiyon")}</select></div><div class="fld"><label for="baR">Rütbe</label><select id="baR">${rolOptions("personel", isGM() || isHR())}</select></div></div>
+      <button type="button" class="btn go block" id="baP">Önizle</button></form><div id="baOut" class="list"></div>`, () => {
+    $("#baH").addEventListener("input", () => { if (!AYAR.girisDomain) $("#baD").value = domainFromHotel($("#baH").value); });
+    $("#baP").onclick = () => {
+      const dom = trLower($("#baD").value.trim().replace(/^@/, ""));
+      if (!/^[a-z0-9.-]+\.[a-z]{2,}$/.test(dom)){ toast("Uzantı crowneplazaflorya.com şeklinde olmalı. Otel adını yaz, kendiliğinden oluşur."); return; }
+      const taken = new Set(S.staff.map(s => s.kullanici).filter(Boolean));
+      const high = isGM() || isHR(), defDept = $("#baDep").value, defRol = $("#baR").value;
+      const rows = [];
+      parseStaff($("#baL").value).forEach(x => {
+        const ex = S.staff.find(s => trLower(s.ad) === trLower(x.ad) || (x.tel && s.tel === x.tel));
+        if (ex && ex.uid) return;
+        const dept = high ? (x.dept && x.dept !== "Diğer" ? x.dept : defDept) : myDept();
+        rows.push({ex, ad:x.ad, tel:x.tel || (ex && ex.tel) || "", unvan:x.unvan, dept: ex ? ex.dept : dept, rol: ex ? ex.rol : (x.rol !== "personel" && high ? x.rol : defRol)});
+      });
+      if ($("#baW") && $("#baW").checked) without.forEach(s => { if (!rows.some(r => r.ex && r.ex.id === s.id)) rows.push({ex:s, ad:s.ad, tel:s.tel||"", unvan:s.unvan||"", dept:s.dept, rol:s.rol||"personel"}); });
+      rows.forEach(r => { r.kullanici = userFor(r.ad, dom, taken); r.sifre = genPw(); });
+      if (!rows.length){ $("#baOut").innerHTML = `<div class="empty">Hesap açılacak kişi bulunamadı. Listede isim yok ya da hepsinin hesabı zaten var.</div>`; return; }
+      $("#baOut").innerHTML = `<div class="banner" style="background:var(--info-soft)">${rows.length} kişiye hesap açılacak. Kontrol et, sonra "Hesapları oluştur"a bas.</div>`
+        + rows.map(r => `<div class="card" style="padding:9px 12px;gap:2px"><b>${esc(r.ad)}</b><span class="muted" style="font-size:12.5px">${esc(r.dept)} · ${esc(ROLLER[r.rol]||"")}${r.tel?" · "+esc(fmtTel(r.tel)):""}</span><span class="num" style="font-size:13px">${esc(r.kullanici)} · şifre <b>${esc(r.sifre)}</b></span></div>`).join("")
+        + `<button class="btn go block" id="baGo">${rows.length} hesabı oluştur</button>`;
+      $("#baGo").onclick = () => runBulk(rows, dom, $("#baH").value.trim());
+    };
+  });
+}
+async function runBulk(rows, dom, hotel){
+  if (mode === "demo"){ toast("Örnek modda hesap açılamaz."); return; }
+  const b = $("#baGo"); b.disabled = true;
+  if (dom !== AYAR.girisDomain || (hotel && hotel !== (AYAR.otel||{}).ad)) await saveAyar({girisDomain:dom, otel:{...(AYAR.otel||{}), ad: hotel || (AYAR.otel||{}).ad || ""}});
+  const done = [], failed = [];
+  for (let i = 0; i < rows.length; i++){
+    const r = rows[i]; b.textContent = `Oluşturuluyor ${i+1}/${rows.length}: ${r.ad}`;
+    try {
+      let st = r.ex;
+      if (!st){
+        const id = "p" + uid8();
+        const ok = await store.set("staff", id, {ad:r.ad, tel:r.tel, unvan:r.unvan||"", dept:r.dept, rol:r.rol, durum:"aktif"});
+        if (!ok) throw {code:"staff"};
+        st = {id, ad:r.ad, tel:r.tel, dept:r.dept, rol:r.rol};
+      }
+      await giveAccess({...st, tel: r.tel || st.tel || ""}, r.sifre, r.kullanici);
+      done.push(r);
+    } catch(e){ failed.push({r, e}); if (/too-many-requests/.test((e && e.code) || "")){ rows.slice(i+1).forEach(x => failed.push({r:x, e:{code:"later"}})); break; } }
+  }
+  bulkResult(done, failed);
+}
+function bulkResult(done, failed){
+  const lines = done.map(r => `${r.ad}\t${r.dept}\t${r.kullanici}\t${r.sifre}${r.tel?"\t"+fmtTel(r.tel):""}`);
+  const text = "Ad Soyad\tDepartman\tKullanıcı adı\tŞifre\tTelefon\n" + lines.join("\n");
+  sheet(`${done.length} hesap hazır`, `${failed.length ? `<div class="banner" style="background:var(--bad-soft)">${failed.length} kişiye açılamadı${failed.some(f=>f.e.code==="later"||/too-many/.test(f.e.code||""))?" (çok hızlı hesap açıldı; Google bir süre bekletiyor, 1 saat sonra aynı listeyi tekrar ver)":""}: ${failed.map(f=>esc(f.r.ad)).join(", ")}</div>` : ""}
+    <div class="row2"><button class="btn go" id="brCopy">Listeyi kopyala</button><button class="btn" id="brShare">Dosya olarak gönder</button></div>
+    <div class="hint">Her kişinin yanındaki SMS düğmesi, bilgileri o kişinin telefonuna hazır mesaj olarak açar.</div>
+    <div class="list">${done.map(r => `<div class="card li" style="padding:9px 12px"><div class="main"><b>${esc(r.ad)}</b><span class="num">${esc(r.kullanici)} · ${esc(r.sifre)}</span></div>${r.tel?`<a class="btn go sm" style="text-decoration:none" href="${esc(smsLink(r.tel, credMsg(r, r.kullanici, r.sifre)))}">SMS</a>`:`<button class="btn sm" data-cp="${esc(r.kullanici)}">Kopyala</button>`}</div>`).join("")}</div>`, () => {
+    $("#brCopy").onclick = () => copyText(text);
+    $("#brShare").onclick = () => shareFile(`HotelPlus-hesaplar-${dayKey(Date.now())}.txt`, text).catch(()=>toast("Gönderilemedi."));
+    document.querySelectorAll("[data-cp]").forEach(b => b.onclick = () => { const r = done.find(x => x.kullanici === b.dataset.cp); copyText(credMsg(r, r.kullanici, r.sifre)); });
+  });
 }
 
 /* ======================= YEDEKLER ======================= */
