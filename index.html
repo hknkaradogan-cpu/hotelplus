@@ -168,7 +168,7 @@ form.f{display:flex;flex-direction:column;gap:10px}
 <script>
 /* ======================= AYARLAR (buradan değiştirilebilir) ======================= */
 const APP_ADI = "HotelPlus";
-const APP_VERSION = 13;   // her yayında 1 artırılır; telefonlarda "Güncelle" bunu karşılaştırır
+const APP_VERSION = 14;   // her yayında 1 artırılır; telefonlarda "Güncelle" bunu karşılaştırır
 const WEB_ADRES = "https://hknkaradogan-cpu.github.io/hotelplus/";
 const OTEL_ADI = "Otel";
 const VARSAYILAN_DEPARTMANLAR = ["Yönetim","Bilgi İşlem (IT)","İnsan Kaynakları","Resepsiyon","Kat Hizmetleri","Çamaşırhane","Teknik Servis","Mutfak","Restoran","Bulaşıkhane","Yiyecek & İçecek","Satın Alma","Spa","Güvenlik","Muhasebe","Satış & Rezervasyon","Animasyon","Diğer"];
@@ -287,31 +287,34 @@ function mergePriv(){
 async function splitPriv(c, id, data){
   if (!PRIV[c] || !DB || !("tel" in data)) return data;
   const {tel, ...rest} = data;
-  try { await DB.collection(PRIV[c]).doc(id).set({tel: tel || ""}, {merge:true}); } catch(e){}
+  try { await col(PRIV[c]).doc(id).set({tel: tel || ""}, {merge:true}); } catch(e){}
   return rest;
 }
 const LOG_SKIP = ["chat","islemler","yedekler","staffTel","guestTel"];
 function summaryOf(c, d){ d = d || {}; return String(d.ad || d.no || d.misafir || d.metin || d.tarih || d.hizmet || "").slice(0, 80); }
 function logOp(islem, c, id, data){
   if (!DB || LOG_SKIP.includes(c)) return;
-  DB.collection("islemler").add({zaman:Date.now(), kim:meId||"", kimAd: me() ? me().ad : (isAdmin() ? "Genel Müdür" : ""), islem, koleksiyon:c, belge:id, ozet:summaryOf(c, data)}).catch(()=>{});
+  col("islemler").add({zaman:Date.now(), kim:meId||"", kimAd: me() ? me().ad : (isAdmin() ? "Genel Müdür" : ""), islem, koleksiyon:c, belge:id, ozet:summaryOf(c, data)}).catch(()=>{});
 }
 const S = {}; COLLS.forEach(c => S[c] = []); S.threads = [];
+let OTEL = null, LIS = null, otelList = [];
+const GLOBAL_COLLS = ["members","logins","oteller"];
+function col(c){ return GLOBAL_COLLS.includes(c) ? FS.collection(c) : FS.collection("oteller").doc(OTEL).collection(c); }
 let DB = null, FS = null, authUser = null, member = null, unsubs = [], loginErr = "", mode = "loading", loadNote = "", signingUp = false;
 let meId = null;
 
 const store = {
   async add(c, data){ return store.set(c, uid8(), data); },
   async set(c, id, data){
-    if (DB){ try { const isNew = !(S[c]||[]).some(x=>x.id===id); const d = await splitPriv(c, id, data); await DB.collection(c).doc(id).set(d); logOp(isNew?"ekledi":"değiştirdi", c, id, data); return true; } catch(e){ handleErr(e); return false; } }
+    if (DB){ try { const isNew = !(S[c]||[]).some(x=>x.id===id); const d = await splitPriv(c, id, data); await col(c).doc(id).set(d); logOp(isNew?"ekledi":"değiştirdi", c, id, data); return true; } catch(e){ handleErr(e); return false; } }
     S[c] = [...S[c].filter(x=>x.id!==id), {id, ...data}]; refresh(); return true;
   },
   async upd(c, id, data){
-    if (DB){ try { const d = await splitPriv(c, id, data); if (Object.keys(d).length) await DB.collection(c).doc(id).update(d); logOp("değiştirdi", c, id, {...((S[c]||[]).find(x=>x.id===id)||{}), ...data}); return true; } catch(e){ handleErr(e); return false; } }
+    if (DB){ try { const d = await splitPriv(c, id, data); if (Object.keys(d).length) await col(c).doc(id).update(d); logOp("değiştirdi", c, id, {...((S[c]||[]).find(x=>x.id===id)||{}), ...data}); return true; } catch(e){ handleErr(e); return false; } }
     S[c] = S[c].map(x => x.id===id ? {...x, ...data} : x); refresh(); return true;
   },
   async del(c, id){
-    if (DB){ try { const old = (S[c]||[]).find(x=>x.id===id); await DB.collection(c).doc(id).delete(); if (PRIV[c]) DB.collection(PRIV[c]).doc(id).delete().catch(()=>{}); logOp("sildi", c, id, old); return true; } catch(e){ handleErr(e); return false; } }
+    if (DB){ try { const old = (S[c]||[]).find(x=>x.id===id); await col(c).doc(id).delete(); if (PRIV[c]) col(PRIV[c]).doc(id).delete().catch(()=>{}); logOp("sildi", c, id, old); return true; } catch(e){ handleErr(e); return false; } }
     S[c] = S[c].filter(x => x.id!==id); refresh(); return true;
   }
 };
@@ -328,7 +331,7 @@ const staffById = id => S.staff.find(s => s.id === id);
 const nameOf = id => (staffById(id) || {}).ad || "—";
 const me = () => staffById(meId);
 const isAdmin = () => !!(authUser && authUser.email === "yonetici@" + EMAIL_DOMAIN);
-const myRol = () => (mode === "demo" || isAdmin()) ? "gm" : ((me() && me().rol) || (member && member.rol) || "personel");
+const myRol = () => mode === "demo" ? "gm" : ((me() && me().rol) || (member && member.rol) || "personel");
 const myDept = () => (me() && me().dept) || (member && member.dept) || "";
 const isGM = () => myRol() === "gm";
 const isHR = () => (["gm","mudur"].includes(myRol()) && myDept() === IK) || myDept() === IT;
@@ -385,6 +388,9 @@ let current = "home";
 function go(v){ if (location.hash !== "#"+v) location.hash = v; else show(v); }
 function show(v){
   if (mode === "login"){ renderLogin(); return; }
+  if (mode === "locked"){ renderLocked(); return; }
+  if (mode === "vendor"){ renderVendor(); return; }
+  if (mode === "migrate") return;
   if (VIEWS[current] && VIEWS[current].leave) { try { VIEWS[current].leave(); } catch(e){} }
   current = VIEWS[v] && (!VIEWS[v].allow || VIEWS[v].allow()) ? v : "home";
   closeSheet();
@@ -399,7 +405,7 @@ function show(v){
 }
 window.addEventListener("hashchange", () => show(location.hash.slice(1) || "home"));
 function refresh(){
-  if (mode === "login") return;
+  if (mode === "login" || mode === "locked" || mode === "vendor" || mode === "migrate") return;
   renderTop();
   const view = VIEWS[current]; const live = $("#live");
   if (!view || !live) return;
@@ -413,7 +419,7 @@ function refresh(){
   bindUpdate();
 }
 function renderTop(){
-  if (mode === "login") return;
+  if (mode === "login" || mode === "locked" || mode === "vendor" || mode === "migrate") return;
   const n = notifications().length;
   const bell = `<button class="hbtn" id="bellBtn" aria-label="Bildirimler">${icon("bell")}${n?`<span class="badge">${n>99?"99+":n}</span>`:""}</button>`;
   const t = VIEWS[current] && VIEWS[current].title;
@@ -479,23 +485,41 @@ async function init(){
     unsubs.forEach(f => { try { f(); } catch(e){} }); unsubs = [];
     COLLS.forEach(c => S[c] = []); S.threads = []; firstDuyuru = true; raw.staff = []; raw.guests = []; telMap.staffTel = {}; telMap.guestTel = {}; member = null; meId = null; firstTasks = {}; firstChat = true; migrated = false; backupChecked = false;
     if (!u){ mode = "login"; renderLogin(); return; }
-    try { const d = await FS.collection("members").doc(u.uid).get(); member = d.exists ? d.data() : null; } catch(e){ member = null; }
-    if (!member && !isAdmin()){
-      let pending = false;
-      try { pending = (await FS.collection("basvurular").doc(u.uid).get()).exists; } catch(e){}
-      loginErr = pending ? "Üyelik başvurun departman müdürünün onayını bekliyor." : "Bu hesabın uygulamaya erişimi kapalı. Departman müdürüne başvur.";
-      await firebase.auth().signOut(); return;
+    try { const d = await col("members").doc(u.uid).get(); member = d.exists ? d.data() : null; } catch(e){ member = null; }
+    if (!member && !isAdmin()){ loginErr = "Bu hesabın uygulamaya erişimi kapalı. Yöneticine başvur."; await firebase.auth().signOut(); return; }
+    loginErr = ""; meId = (member && member.staffId) || null; DB = FS;
+    if (isAdmin()) subscribeOteller();
+    if (isAdmin() && (!member || !member.otel)){
+      let none = false; try { none = (await FS.collection("oteller").limit(1).get({source:"server"})).empty; } catch(e){}
+      if (none){ mode = "migrate"; migrateLegacy(); return; }
     }
-    loginErr = ""; meId = (member && member.staffId) || null;
-    DB = FS; mode = "loading";
+    if (member && !member.otel){
+      loginErr = "Hesabın bir otele bağlı değil. Yöneticine başvur."; await firebase.auth().signOut(); return;
+    }
+    if (!member){ mode = "vendor"; OTEL = null; renderVendor(); return; }
+    OTEL = member.otel;
+    try { const od = await FS.collection("oteller").doc(OTEL).get(); LIS = od.exists ? od.data() : null; } catch(e){ LIS = null; }
+    unsubs.push(FS.collection("oteller").doc(OTEL).onSnapshot(d => { const was = licLocked(); LIS = d.exists ? d.data() : null; if (was !== licLocked()) location.reload(); else refresh(); }, () => {}));
+    if (licLocked()){ mode = "locked"; renderLocked(); return; }
+    mode = "loading";
     show(location.hash.slice(1) || "home");
     subscribe();
     askNotifyPermission();
-    if (isAdmin() && !meId) setTimeout(profileSheet, 600);
   });
 }
+const licDaysLeft = () => LIS && LIS.bitis ? Math.ceil((LIS.bitis - Date.now()) / 864e5) : 0;
+const licLocked = () => !LIS || LIS.durum !== "aktif" || !(LIS.bitis > Date.now());
+const SATICI = {ad:"HotelPlus", tel:""};
+function renderLocked(){
+  closeSheet(); document.querySelectorAll(".fab,.composer,.bulkbar").forEach(n=>n.remove());
+  $("#top").innerHTML = `<div class="mark">${icon("star","#d9a426")}</div><h1>${esc(APP_ADI)}</h1>${isAdmin()?`<button class="hbtn" id="lkV">Lisanslar</button>`:""}<button class="hbtn" id="lkO" aria-label="Çıkış">${icon("user")}</button>`;
+  const why = !LIS ? "Otelin lisans kaydı bulunamadı." : LIS.durum !== "aktif" ? "Otelin lisansı askıya alındı." : `Otelin lisansı ${fmtD(LIS.bitis)} tarihinde sona erdi.`;
+  $("#main").innerHTML = `<div class="login list"><div class="card" style="border-color:var(--bad)"><b style="font:600 18px var(--display)">Lisans süresi doldu</b><div>${esc(why)} Lisans yenilenene kadar kullanılamaz. Verileriniz silinmedi; lisans yenilenince kaldığınız yerden devam edersiniz.</div><div class="muted">Lisans yenilemek için ${esc(SATICI.ad)} ile iletişime geçin${SATICI.tel?` · <a href="tel:${esc(SATICI.tel.replace(/\s/g,""))}">${esc(SATICI.tel)}</a>`:""}.</div></div></div>`;
+  $("#lkO").onclick = () => firebase.auth().signOut();
+  if ($("#lkV")) $("#lkV").onclick = renderVendor;
+}
 let firstTasks = {}, firstChat = true, migrated = false, backupChecked = false;
-const gmM = () => isAdmin() || (member && member.rol === "gm");
+const gmM = () => !!(member && member.rol === "gm");
 const mgrM = () => gmM() || (member && (member.rol === "mudur" || member.dept === IT));
 function subscribe(){
   const timer = setTimeout(()=>{ if(mode==="loading"){ loadNote = "Veriler yüklenemedi; internet gelince otomatik güncellenecek."; mode = "live"; refresh(); } }, 10000);
@@ -505,7 +529,7 @@ function subscribe(){
     if (MANAGER_ONLY.includes(c) && !mgrM()) return;
     if (c === "guestTel" && !(mgrM() || (member && member.dept === "Resepsiyon"))) return;
     if (c === "islemler" && !gmM()) return;
-    let q = DB.collection(c);
+    let q = col(c);
     if (c === "chat") q = q.orderBy("zaman","desc").limit(200);
     if (c === "gmsgs") q = q.orderBy("zaman","desc").limit(300);
     if (c === "shifts") q = q.where("giris", ">=", Date.now() - 31*864e5);
@@ -513,6 +537,7 @@ function subscribe(){
     if (c === "islemler") q = q.orderBy("zaman","desc").limit(300);
     if (c === "yedekler") q = q.orderBy("zaman","desc").limit(60);
     if (c === "duyurular") q = q.orderBy("zaman","desc").limit(50);
+    if (c === "members") q = q.where("otel", "==", OTEL);
     if (c === "devriyeKayit") q = q.where("tarih", ">=", dayKey(Date.now() - 7*864e5));
     if (c === "sikayetler" || c === "kayipesya") q = q.orderBy("zaman","desc").limit(300);
     unsubs.push(q.onSnapshot(snap => {
@@ -530,12 +555,12 @@ function subscribe(){
   });
   subscribeTasks(fail("tasks"));
   subscribeThreads();
-  unsubs.push(DB.collection("ayarlar").doc("genel").onSnapshot(d => { if (d.exists) AYAR = {...AYAR, ...d.data()}; refresh(); }, () => {}));
+  unsubs.push(col("ayarlar").doc("genel").onSnapshot(d => { if (d.exists) AYAR = {...AYAR, ...d.data()}; refresh(); }, () => {}));
 }
 function subscribeTasks(onErr){
   const sid = member && member.staffId;
-  const qs = gmM() ? [DB.collection("tasks").where("talep", ">=", Date.now() - 45*864e5)]
-    : [member && member.dept ? DB.collection("tasks").where("dept", "==", member.dept) : null, sid ? DB.collection("tasks").where("atanan", "==", sid) : null, sid ? DB.collection("tasks").where("olusturan", "==", sid) : null].filter(Boolean);
+  const qs = gmM() ? [col("tasks").where("talep", ">=", Date.now() - 45*864e5)]
+    : [member && member.dept ? col("tasks").where("dept", "==", member.dept) : null, sid ? col("tasks").where("atanan", "==", sid) : null, sid ? col("tasks").where("olusturan", "==", sid) : null].filter(Boolean);
   const parts = qs.map(() => new Map());
   qs.forEach((q, i) => unsubs.push(q.onSnapshot(snap => {
     onTaskChanges(snap, i);
@@ -549,7 +574,7 @@ async function maybeMigrate(){
   if (migrated || !gmM() || !DB) return; migrated = true;
   const del = firebase.firestore.FieldValue.delete();
   for (const c of ["staff","guests"]) for (const x of raw[c]) if (x.tel){
-    try { await DB.collection(PRIV[c]).doc(x.id).set({tel:x.tel}, {merge:true}); await DB.collection(c).doc(x.id).update({tel:del}); } catch(e){}
+    try { await col(PRIV[c]).doc(x.id).set({tel:x.tel}, {merge:true}); await col(c).doc(x.id).update({tel:del}); } catch(e){}
   }
 }
 const canStaffAdminFromMember = () => isAdmin() || (member && ["gm","mudur"].includes(member.rol));
@@ -566,7 +591,7 @@ function renderLogin(){
     <button class="btn go block" id="lGo">Giriş yap</button>
     <button type="button" class="btn" id="lFor">Şifremi unuttum</button>
     <div class="hint" style="text-align:center">Hesabını otel yönetimi açar. Kullanıcı adın ve şifren SMS ile gelir.</div></form>
-    <button type="button" class="btn sm" id="lSetup" style="align-self:center">İlk kurulum (genel müdür)</button></div>`;
+    </div>`;
   $("#lf").onsubmit = async e => { e.preventDefault(); const b=$("#lGo"); b.disabled=true; b.textContent="Giriş yapılıyor…";
     try {
       const raw = $("#lU").value.trim(); let email;
@@ -574,7 +599,7 @@ function renderLogin(){
       if (!key) throw {code:"invalid-email"};
       if (key === "yonetici") email = "yonetici@" + EMAIL_DOMAIN;
       else {
-        const d = await FS.collection("logins").doc(key).get({source:"server"});
+        const d = await col("logins").doc(key).get({source:"server"});
         if (!d.exists){ loginErr = "Bu kullanıcı adı ya da telefonla aktif bir hesap yok. Yönetime başvur."; renderLogin(); return; }
         email = d.data().email;
       }
@@ -582,7 +607,6 @@ function renderLogin(){
     } catch(err){ loginErr = authMsg(err); renderLogin(); } };
   bindUpdate();
   $("#lFor").onclick = forgotSheet;
-  $("#lSetup").onclick = setupSheet;
 }
 function loginKey(raw){
   raw = String(raw||"").trim();
@@ -605,12 +629,12 @@ function registerSheet(){
       if ($("#rP").value !== $("#rP2").value) return err("Şifreler aynı değil.");
       const b = $("#rGo"); b.disabled = true; b.textContent = "Gönderiliyor…";
       try {
-        const ex = await FS.collection("logins").doc(tel).get({source:"server"}).catch(()=>null);
+        const ex = await col("logins").doc(tel).get({source:"server"}).catch(()=>null);
         if (ex && ex.exists){ b.disabled=false; b.textContent="Başvuruyu gönder"; return err("Bu numarayla zaten bir hesap var. Giriş yap ya da 'Şifremi unuttum'u kullan."); }
         signingUp = true;
         const email = newEmailFor(tel);
         const cred = await firebase.auth().createUserWithEmailAndPassword(email, $("#rP").value);
-        await FS.collection("basvurular").doc(cred.user.uid).set({uid:cred.user.uid, ad:$("#rA").value.trim(), tel, dept:$("#rD").value, unvan:$("#rU").value.trim(), email, zaman:Date.now()});
+        await col("basvurular").doc(cred.user.uid).set({uid:cred.user.uid, ad:$("#rA").value.trim(), tel, dept:$("#rD").value, unvan:$("#rU").value.trim(), email, zaman:Date.now()});
         await firebase.auth().signOut();
         signingUp = false; authUser = null; mode = "login";
         loginErr = ""; closeSheet(); renderLogin();
@@ -624,7 +648,8 @@ function forgotSheet(){
     <form class="f" id="fgf"><div class="fld"><label for="fT">Kullanıcı adın veya telefonun</label><input id="fT" autocapitalize="none" spellcheck="false" placeholder="ad.soyad@otel.com ya da 05xx…" required></div><div id="fE"></div><button class="btn go block">Talep gönder</button></form>`, () => {
     $("#fgf").onsubmit = async e => { e.preventDefault(); const tel = loginKey($("#fT").value);
       if (!tel || tel === "yonetici"){ $("#fE").innerHTML = `<div class="banner">Kullanıcı adını ya da telefonunu doğru yaz.</div>`; return; }
-      try { await FS.collection("sifreTalepleri").doc(tel).set({tel, zaman:Date.now()}); closeSheet(); toast("Talebin müdürüne iletildi."); }
+      try { const lg = await FS.collection("logins").doc(tel).get({source:"server"}); if (!lg.exists || !lg.data().otel){ $("#fE").innerHTML = `<div class="banner">Bu kullanıcı adı ya da telefonla kayıtlı hesap bulunamadı.</div>`; return; }
+        await FS.collection("oteller").doc(lg.data().otel).collection("sifreTalepleri").doc(tel).set({tel, zaman:Date.now()}); closeSheet(); toast("Talebin müdürüne iletildi."); }
       catch(er){ $("#fE").innerHTML = `<div class="banner">${esc(authMsg(er))}</div>`; } };
   });
 }
@@ -652,10 +677,10 @@ async function saveAdminProfile(ad, tel){
   const ex = S.staff.find(s => s.tel === tel);
   const sid = ex ? ex.id : ("p" + uid8());
   const {tel:_t, ...exs} = ex ? clean(ex) : {};
-  await FS.collection("staff").doc(sid).set({...exs, ad, dept:"Yönetim", rol:"gm", unvan:"Genel Müdür", durum:"aktif", uid:authUser.uid, authEmail:authUser.email});
-  await FS.collection("staffTel").doc(sid).set({tel});
-  await FS.collection("members").doc(authUser.uid).set({staffId:sid, rol:"gm", dept:"Yönetim"});
-  await FS.collection("logins").doc(tel).set({email:authUser.email, staffId:sid});
+  await col("staff").doc(sid).set({...exs, ad, dept:"Yönetim", rol:"gm", unvan:"Genel Müdür", durum:"aktif", uid:authUser.uid, authEmail:authUser.email});
+  await col("staffTel").doc(sid).set({tel});
+  await col("members").doc(authUser.uid).set({otel:OTEL, staffId:sid, rol:"gm", dept:"Yönetim"});
+  await col("logins").doc(tel).set({email:authUser.email, staffId:sid, otel:OTEL});
   member = {staffId:sid, rol:"gm", dept:"Yönetim"}; meId = sid;
 }
 const clean = o => { const r = {}; for (const [k,v] of Object.entries(o)) if (v !== undefined && k !== "id") r[k] = v; return r; };
@@ -691,7 +716,7 @@ function changePwSheet(forced){
       if ($("#cN").value.length < 8) return err("Şifre en az 8 karakter olmalı.");
       if ($("#cN").value === $("#cO").value) return err("Yeni şifre eskisinden farklı olmalı.");
       try { const u = firebase.auth().currentUser; await u.reauthenticateWithCredential(firebase.auth.EmailAuthProvider.credential(u.email, $("#cO").value)); await u.updatePassword($("#cN").value);
-        if (member && (member.sifreDegistir || member.geciciSifre)){ try { await FS.collection("members").doc(u.uid).update({sifreDegistir:false, geciciSifre:firebase.firestore.FieldValue.delete()}); member.sifreDegistir = false; } catch(x){} }
+        if (member && (member.sifreDegistir || member.geciciSifre)){ try { await col("members").doc(u.uid).update({sifreDegistir:false, geciciSifre:firebase.firestore.FieldValue.delete()}); member.sifreDegistir = false; } catch(x){} }
         closeSheet(); toast("Şifren değişti."); }
       catch(er){ err(authMsg(er)); } };
   }, {locked: !!forced});
@@ -714,20 +739,20 @@ function suggestUser(st){
 async function giveAccess(st, pw, kullanici){
   kullanici = trLower(kullanici).replace(/\s+/g,"");
   if (!/^[a-z0-9._-]+@[a-z0-9.-]+\.[a-z]{2,}$/.test(kullanici)) throw {code:"bad-user"};
-  const other = await FS.collection("logins").doc(kullanici).get({source:"server"}).catch(()=>null);
+  const other = await col("logins").doc(kullanici).get({source:"server"}).catch(()=>null);
   if (other && other.exists && other.data().staffId !== st.id) throw {code:"user-taken"};
   const email = "u" + uid8() + "@" + EMAIL_DOMAIN;
   const sa = await secondaryAuth();
   const cred = await sa.createUserWithEmailAndPassword(email, pw);
   const uid = cred.user.uid; await sa.signOut();
-  await FS.collection("members").doc(uid).set({staffId:st.id, rol:st.rol||"personel", dept:st.dept});
-  if (st.uid && st.uid !== uid){ try { await FS.collection("members").doc(st.uid).delete(); } catch(e){} }
-  await FS.collection("staff").doc(st.id).update({uid, authEmail:email, durum:"aktif", kullanici});
-  await FS.collection("staffTel").doc(st.id).set({tel: st.tel || "", sifre: pw}, {merge:true});
-  if (st.kullanici && st.kullanici !== kullanici){ try { await FS.collection("logins").doc(st.kullanici).delete(); } catch(e){} }
-  await FS.collection("logins").doc(kullanici).set({email, staffId:st.id});
-  if (telOk(st.tel||"")) await FS.collection("logins").doc(st.tel).set({email, staffId:st.id});
-  for (const k of [st.tel, kullanici, st.kullanici]) if (k) { try { await FS.collection("sifreTalepleri").doc(k).delete(); } catch(e){} }
+  await col("members").doc(uid).set({otel:OTEL, staffId:st.id, rol:st.rol||"personel", dept:st.dept});
+  if (st.uid && st.uid !== uid){ try { await col("members").doc(st.uid).delete(); } catch(e){} }
+  await col("staff").doc(st.id).update({uid, authEmail:email, durum:"aktif", kullanici});
+  await col("staffTel").doc(st.id).set({tel: st.tel || "", sifre: pw}, {merge:true});
+  if (st.kullanici && st.kullanici !== kullanici){ try { await col("logins").doc(st.kullanici).delete(); } catch(e){} }
+  await col("logins").doc(kullanici).set({email, staffId:st.id, otel:OTEL});
+  if (telOk(st.tel||"")) await col("logins").doc(st.tel).set({email, staffId:st.id, otel:OTEL});
+  for (const k of [st.tel, kullanici, st.kullanici]) if (k) { try { await col("sifreTalepleri").doc(k).delete(); } catch(e){} }
   logOp("şifre verdi", "staff", st.id, st);
 }
 function credMsg(st, kullanici, pw){ return `Kullanıcı adı: ${kullanici}\nŞifre: ${pw}`; }
@@ -759,10 +784,10 @@ function accessSheet(st, reset){
 }
 async function deactivate(st, quiet){
   try {
-    if (st.uid) await FS.collection("members").doc(st.uid).delete();
-    if (st.tel) await FS.collection("logins").doc(st.tel).delete();
-    if (st.kullanici) await FS.collection("logins").doc(st.kullanici).delete().catch(()=>{});
-    await FS.collection("staff").doc(st.id).update({durum:"pasif"});
+    if (st.uid) await col("members").doc(st.uid).delete();
+    if (st.tel) await col("logins").doc(st.tel).delete();
+    if (st.kullanici) await col("logins").doc(st.kullanici).delete().catch(()=>{});
+    await col("staff").doc(st.id).update({durum:"pasif"});
     logOp("girişini kapattı", "staff", st.id, st);
     if (!quiet) toast(`${st.ad} artık giriş yapamaz.`);
   } catch(e){ handleErr(e); }
@@ -772,12 +797,12 @@ async function approveApp(b){
     const ex = S.staff.find(s => s.tel === b.tel);
     const sid = ex ? ex.id : "p" + uid8();
     const {tel:_t, ...base} = ex ? clean(ex) : {ad:b.ad, dept:b.dept, unvan:b.unvan||"", rol:"personel"};
-    await FS.collection("staff").doc(sid).set({...base, dept: ex ? ex.dept : b.dept, uid:b.uid, authEmail:b.email, durum:"aktif"});
-    await FS.collection("staffTel").doc(sid).set({tel:b.tel});
+    await col("staff").doc(sid).set({...base, dept: ex ? ex.dept : b.dept, uid:b.uid, authEmail:b.email, durum:"aktif"});
+    await col("staffTel").doc(sid).set({tel:b.tel});
     logOp("onayladı", "staff", sid, {ad:b.ad});
-    await FS.collection("members").doc(b.uid).set({staffId:sid, rol:base.rol||"personel", dept: ex ? ex.dept : b.dept});
-    await FS.collection("logins").doc(b.tel).set({email:b.email, staffId:sid});
-    await FS.collection("basvurular").doc(b.id).delete();
+    await col("members").doc(b.uid).set({otel:OTEL, staffId:sid, rol:base.rol||"personel", dept: ex ? ex.dept : b.dept});
+    await col("logins").doc(b.tel).set({email:b.email, staffId:sid, otel:OTEL});
+    await col("basvurular").doc(b.id).delete();
     toast(`${b.ad} onaylandı. Artık giriş yapabilir.`);
   } catch(e){ handleErr(e); }
 }
@@ -793,7 +818,9 @@ VIEWS.home = {
     const apps = canStaffAdmin() ? S.basvurular.filter(b=>managesDept(b.dept)).length + S.sifreTalepleri.length : 0;
     const T = (v, ic, col, soft, label, badge) => `<button class="tile" data-go="${v}"><span class="ic" style="background:${soft}">${icon(ic,col)}</span><span class="t">${label}</span>${badge?`<span class="badge">${badge}</span>`:""}</button>`;
     const dolu = S.rooms.filter(x=>x.durum==="dolu").length;
-    return `
+    const dl = licDaysLeft();
+    return `${LIS && dl <= 7 && isManager() ? `<div class="banner" style="background:var(--bad-soft)"><b>Lisansın ${dl} gün sonra bitiyor</b> (${fmtD(LIS.bitis)}). Kesinti olmaması için ${esc(SATICI.ad)} ile iletişime geç${SATICI.tel?": "+esc(SATICI.tel):"."}</div>` : ""}
+      ${isAdmin() ? `<button class="btn block" data-go="lisans" style="border-color:#d9a426">🔑 Lisans yönetimi (${otelList.length} otel)</button>` : ""}
       <div class="hello"><div><b>Merhaba${m?", "+esc(m.ad.split(" ")[0]):""}</b><div class="muted" style="font-size:12.5px">${esc(ROLLER[myRol()])}${myDept()?" · "+esc(myDept()):""}</div></div></div>
       <button class="btn go block" data-go="yeni">${icon("plus")} Görev / arıza / istek gönder</button>
       <h2>${isGM()?"Oteldeki açık görevler":"Departmanımdaki açık görevler"}</h2>
@@ -1064,10 +1091,10 @@ function staffSheet(id){
       const data = {ad:$("#eA").value.trim(), tel, unvan:$("#eU").value.trim(), dept:$("#eD").value, rol:$("#eR").value};
       if (s){
         await store.upd("staff", s.id, data);
-        if (s.uid && s.durum !== "pasif" && (s.rol !== data.rol || s.dept !== data.dept) && FS) { try { await FS.collection("members").doc(s.uid).set({staffId:s.id, rol:data.rol, dept:data.dept}, {merge:true}); } catch(er){ handleErr(er); } }
-        if (s.uid && s.tel !== tel && FS && s.durum !== "pasif"){ try { if (s.tel) await FS.collection("logins").doc(s.tel).delete(); if (tel) await FS.collection("logins").doc(tel).set({email:s.authEmail, staffId:s.id}); } catch(er){} }
+        if (s.uid && s.durum !== "pasif" && (s.rol !== data.rol || s.dept !== data.dept) && FS) { try { await col("members").doc(s.uid).set({otel:OTEL, staffId:s.id, rol:data.rol, dept:data.dept}, {merge:true}); } catch(er){ handleErr(er); } }
+        if (s.uid && s.tel !== tel && FS && s.durum !== "pasif"){ try { if (s.tel) await col("logins").doc(s.tel).delete(); if (tel) await col("logins").doc(tel).set({email:s.authEmail, staffId:s.id, otel:OTEL}); } catch(er){} }
         toast("Kaydedildi.");
-      } else { await store.add("staff", {...data, durum:"aktif"}); toast(`${data.ad} eklendi.`); }
+      } else { if (!staffRoom(1)) return; await store.add("staff", {...data, durum:"aktif"}); toast(`${data.ad} eklendi.`); }
       closeSheet();
     };
     if ($("#eSms")) $("#eSms").onclick = () => credSheet(s, s.kullanici, s.sifre);
@@ -1422,8 +1449,8 @@ async function uploadFile(file, bag){
   const {dataUrl, type} = isImg ? await compressImage(file) : {dataUrl: await readDataUrl(file), type: file.type||"video/mp4"};
   const b64 = dataUrl.slice(dataUrl.indexOf(",")+1);
   const id = "f" + uid8(), n = Math.ceil(b64.length / PARCA);
-  for (let i=0; i<n; i++) await DB.collection("dosyalar").doc(id).collection("parca").doc(String(i).padStart(3,"0")).set({i, d:b64.slice(i*PARCA, (i+1)*PARCA)});
-  await DB.collection("dosyalar").doc(id).set({ad:file.name||"dosya", tur:type, boyut:Math.round(b64.length*0.75), parca:n, zaman:Date.now(), kim:meId||"", bag});
+  for (let i=0; i<n; i++) await col("dosyalar").doc(id).collection("parca").doc(String(i).padStart(3,"0")).set({i, d:b64.slice(i*PARCA, (i+1)*PARCA)});
+  await col("dosyalar").doc(id).set({ad:file.name||"dosya", tur:type, boyut:Math.round(b64.length*0.75), parca:n, zaman:Date.now(), kim:meId||"", bag});
   return {id, tur:type, ad:file.name||""};
 }
 async function uploadPending(bag, onProgress){
@@ -1434,8 +1461,8 @@ async function uploadPending(bag, onProgress){
 const fileCache = {};
 async function loadFile(id){
   if (fileCache[id]) return fileCache[id];
-  const meta = await DB.collection("dosyalar").doc(id).get(); if (!meta.exists) throw new Error("yok");
-  const parts = await DB.collection("dosyalar").doc(id).collection("parca").get();
+  const meta = await col("dosyalar").doc(id).get(); if (!meta.exists) throw new Error("yok");
+  const parts = await col("dosyalar").doc(id).collection("parca").get();
   const b64 = parts.docs.map(d => d.data()).sort((a,b)=>a.i-b.i).map(x=>x.d).join("");
   const bin = atob(b64), arr = new Uint8Array(bin.length); for (let i=0;i<bin.length;i++) arr[i] = bin.charCodeAt(i);
   const m = meta.data(); const url = URL.createObjectURL(new Blob([arr], {type:m.tur}));
@@ -1492,7 +1519,7 @@ function duyuruSheet(){
 /* ======================= DEPARTMAN & AYARLAR (GM ve Bilgi İşlem) ======================= */
 async function saveAyar(patch){
   AYAR = {...AYAR, ...patch};
-  if (DB){ try { await DB.collection("ayarlar").doc("genel").set(patch, {merge:true}); logOp("değiştirdi", "ayarlar", "genel", {ad:Object.keys(patch).join(", ")}); } catch(e){ handleErr(e); return false; } }
+  if (DB){ try { await col("ayarlar").doc("genel").set(patch, {merge:true}); logOp("değiştirdi", "ayarlar", "genel", {ad:Object.keys(patch).join(", ")}); } catch(e){ handleErr(e); return false; } }
   refresh(); return true;
 }
 VIEWS.ayarlar = {
@@ -1806,9 +1833,9 @@ let threadParts = {};
 function subscribeThreads(){
   threadParts = {}; threadFirst = {}; S.threads = [];
   const sid = member && member.staffId;
-  if (sid) unsubs.push(DB.collection("sohbetler").where("uyeler", "array-contains", sid).onSnapshot(s => onThreadsSnap("my", s.docs.map(d => ({id:d.id, ...d.data()}))), () => {}));
-  if (gmM()) unsubs.push(DB.collection("sohbetler").where("tur", "==", "dept").onSnapshot(s => onThreadsSnap("dept", s.docs.map(d => ({id:d.id, ...d.data()}))), () => {}));
-  else if (member && member.dept) unsubs.push(DB.collection("sohbetler").doc(deptTid(member.dept)).onSnapshot(d => onThreadsSnap("dept", d.exists ? [{id:d.id, ...d.data()}] : []), () => {}));
+  if (sid) unsubs.push(col("sohbetler").where("uyeler", "array-contains", sid).onSnapshot(s => onThreadsSnap("my", s.docs.map(d => ({id:d.id, ...d.data()}))), () => {}));
+  if (gmM()) unsubs.push(col("sohbetler").where("tur", "==", "dept").onSnapshot(s => onThreadsSnap("dept", s.docs.map(d => ({id:d.id, ...d.data()}))), () => {}));
+  else if (member && member.dept) unsubs.push(col("sohbetler").doc(deptTid(member.dept)).onSnapshot(d => onThreadsSnap("dept", d.exists ? [{id:d.id, ...d.data()}] : []), () => {}));
 }
 function openThread(tid, meta){ curTid = tid; curMeta = meta || S.threads.find(t => t.id === tid) || {tur:"genel"}; if (current === "konusma") show("konusma"); else go("konusma"); }
 function openDM(id){ if (!id || id === meId){ toast("Kendine mesaj atamazsın."); return; } if (!meId){ toast("Hesabın bir personele bağlı değil."); return; } const tid = dmTid(meId, id); openThread(tid, S.threads.find(t => t.id === tid) || {id:tid, tur:"dm", uyeler:[meId, id]}); }
@@ -1840,11 +1867,11 @@ function groupSheet(){
     $("#gf2").onsubmit = async e => { e.preventDefault(); const uyeler = [...document.querySelectorAll("#gf2 input[type=checkbox]:checked")].map(x => x.value);
       if (!uyeler.length){ toast("En az bir kişi seç."); return; } if (!meId){ toast("Hesabın bir personele bağlı değil."); return; }
       const tid = "g_" + uid8(), data = {tur:"grup", ad:$("#gA").value.trim(), uyeler:[meId, ...uyeler], olusturan:meId, zaman:Date.now()};
-      if (DB){ try { await DB.collection("sohbetler").doc(tid).set(data); } catch(er){ handleErr(er); return; } }
+      if (DB){ try { await col("sohbetler").doc(tid).set(data); } catch(er){ handleErr(er); return; } }
       closeSheet(); openThread(tid, {id:tid, ...data}); };
   });
 }
-const msgsRef = tid => tid === "genel" ? DB.collection("chat") : DB.collection("sohbetler").doc(tid).collection("mesajlar");
+const msgsRef = tid => tid === "genel" ? col("chat") : col("sohbetler").doc(tid).collection("mesajlar");
 VIEWS.konusma = {
   get title(){ return curTid === "genel" ? "Tüm otel sohbeti" : threadTitle(curMeta); },
   allow: () => true,
@@ -1873,10 +1900,10 @@ async function sendMsg(m){
   const msg = {kim:meId||"", metin:m.metin||"", zaman:Date.now(), ...(m.ses?{ses:m.ses}:{})};
   if (!DB){ if (curTid === "genel") S.chat = S.chat.concat({id:uid8(), ...msg}); else msgCache[curTid] = (msgCache[curTid]||[]).concat({id:uid8(), ...msg}); refresh(); return; }
   try {
-    if (curTid === "genel"){ await DB.collection("chat").add(msg); return; }
+    if (curTid === "genel"){ await col("chat").add(msg); return; }
     const son = {metin: msg.metin || "🎤 Sesli mesaj", zaman: msg.zaman, kim: msg.kim};
     const base = curMeta.tur === "dept" ? {tur:"dept", dept:curMeta.dept} : curMeta.tur === "dm" ? {tur:"dm", uyeler:curMeta.uyeler} : {tur:"grup", ad:curMeta.ad, uyeler:curMeta.uyeler, olusturan:curMeta.olusturan||"", zaman:curMeta.zaman||Date.now()};
-    await DB.collection("sohbetler").doc(curTid).set({...base, son}, {merge:true});
+    await col("sohbetler").doc(curTid).set({...base, son}, {merge:true});
     await msgsRef(curTid).add(msg);
   } catch(e){ handleErr(e); }
 }
@@ -1908,12 +1935,12 @@ async function cleanupFiles(){
   if (!DB || !gmM()) return;
   try {
     const cut = Date.now() - EK_SAKLA_GUN*864e5;
-    const snap = await DB.collection("dosyalar").where("zaman", "<", cut).limit(100).get();
+    const snap = await col("dosyalar").where("zaman", "<", cut).limit(100).get();
     for (const d of snap.docs){ if ((d.data().bag||"") === "otel") continue; const parts = await d.ref.collection("parca").get(); for (const p of parts.docs) await p.ref.delete(); await d.ref.delete(); }
   } catch(e){}
 }
 async function usageInfo(){
-  const snap = await DB.collection("dosyalar").get();
+  const snap = await col("dosyalar").get();
   let bytes = 0, foto = 0, ses = 0; snap.docs.forEach(d => { const x = d.data(); bytes += x.boyut||0; if ((x.tur||"").startsWith("audio")) ses++; else foto++; });
   return {mb: bytes/1048576, foto, ses};
 }
@@ -1993,8 +2020,10 @@ function bulkAccountSheet(){
     };
   });
 }
+function staffRoom(n){ const max = LIS && LIS.maxPersonel || 0; if (!max) return true; const cur = S.staff.filter(s => s.durum !== "pasif").length; if (cur + n > max){ toast(`Lisansın en fazla ${max} personel içeriyor (şu an ${cur}). Daha fazlası için lisansı yükselt.`); return false; } return true; }
 async function runBulk(rows, dom, hotel){
   if (mode === "demo"){ toast("Örnek modda hesap açılamaz."); return; }
+  if (!staffRoom(rows.filter(r => !r.ex).length)) return;
   const b = $("#baGo"); b.disabled = true;
   if (dom !== AYAR.girisDomain || (hotel && hotel !== (AYAR.otel||{}).ad)) await saveAyar({girisDomain:dom, otel:{...(AYAR.otel||{}), ad: hotel || (AYAR.otel||{}).ad || ""}});
   const done = [], failed = [];
@@ -2029,13 +2058,152 @@ function bulkResult(done, failed){
   });
 }
 
+
+/* ======================= LİSANS YÖNETİMİ (sadece uygulama sahibi) ======================= */
+let otelUnsub = null;
+function subscribeOteller(){
+  if (otelUnsub) otelUnsub();
+  otelUnsub = FS.collection("oteller").onSnapshot(sn => { otelList = sn.docs.map(d => ({id:d.id, ...d.data()})).sort((a,b) => String(a.ad).localeCompare(String(b.ad), "tr")); if (mode === "vendor") renderVendor(); else refresh(); }, () => {});
+  unsubs.push(() => { if (otelUnsub){ otelUnsub(); otelUnsub = null; } });
+}
+const LIS_TUR = {demo:"Demo", aylik:"Aylık", yillik:"Yıllık", sahip:"Sahip"};
+function vendorHtml(){
+  const now = Date.now();
+  return `<button class="btn go block" id="vnNew">+ Yeni otel ve lisans</button>
+    <div class="hint">Lisans süresi dolan ya da askıya alınan otelde kimse işlem yapamaz; veriler silinmez. Otellerin içindeki personel, misafir ve görev bilgilerini buradan göremezsin.</div>`
+    + (otelList.length ? otelList.map(o => { const dl = Math.ceil(((o.bitis||0) - now) / 864e5); const bad = o.durum !== "aktif" || dl <= 0;
+      return `<div class="card" style="${bad?"border-color:var(--bad)":dl<=7?"border-color:var(--warn)":""}"><div class="t1 li"><div class="main"><b>${esc(o.ad)}</b><span>${esc(o.domain||"")} · ${esc(LIS_TUR[o.lisansTur]||o.lisansTur||"")}${o.maxPersonel?` · en fazla ${o.maxPersonel} personel`:""}</span></div><span class="chip ${bad?"bad":dl<=7?"warn":"ok"}">${o.durum!=="aktif"?"Askıda":dl<=0?"Süresi doldu":dl+" gün"}</span></div>
+        <div class="meta"><span>Bitiş: <b>${o.bitis?fmtD(o.bitis):"—"}</b></span>${o.gmAd?`<span>Genel müdür: ${esc(o.gmAd)}</span>`:""}${o.gmKullanici?`<span>${esc(o.gmKullanici)}</span>`:""}${o.iletisim?`<span>${esc(o.iletisim)}</span>`:""}</div>
+        <div class="acts"><button class="btn ok sm" data-vx="30" data-id="${esc(o.id)}">+30 gün</button><button class="btn ok sm" data-vx="365" data-id="${esc(o.id)}">+1 yıl</button><button class="btn sm" data-vd="${esc(o.id)}">Tarih / tür</button><button class="btn sm ${o.durum==="aktif"?"danger":""}" data-vs="${esc(o.id)}">${o.durum==="aktif"?"Askıya al":"Aktif et"}</button>${o.gmStaffId&&o.lisansTur!=="sahip"?`<button class="btn sm" data-vg="${esc(o.id)}">Genel müdür şifresi</button>`:""}</div></div>`; }).join("")
+      : `<div class="empty">Henüz otel yok.</div>`);
+}
+function bindVendor(){
+  $("#vnNew").onclick = newHotelSheet;
+  document.querySelectorAll("[data-vx]").forEach(b => b.onclick = async () => { const o = otelList.find(x => x.id === b.dataset.id); const base = Math.max(Date.now(), o.bitis||0); try { await FS.collection("oteller").doc(o.id).update({bitis: base + (+b.dataset.vx)*864e5, durum:"aktif", ...(o.lisansTur==="demo" ? {lisansTur: +b.dataset.vx >= 365 ? "yillik" : "aylik"} : {})}); toast(`${o.ad}: lisans uzatıldı.`); } catch(e){ handleErr(e); } });
+  document.querySelectorAll("[data-vs]").forEach(b => b.onclick = () => { const o = otelList.find(x => x.id === b.dataset.vs); const to = o.durum === "aktif" ? "askida" : "aktif"; confirmSheet(`${o.ad} ${to==="askida"?"askıya alınsın mı? Otelde kimse işlem yapamaz.":"yeniden aktif edilsin mi?"}`, async () => { try { await FS.collection("oteller").doc(o.id).update({durum:to}); } catch(e){ handleErr(e); } }, to==="askida"?"Askıya al":"Aktif et"); });
+  document.querySelectorAll("[data-vd]").forEach(b => b.onclick = () => { const o = otelList.find(x => x.id === b.dataset.vd);
+    sheet(esc(o.ad), `<form class="f" id="vdf"><div class="row2"><div class="fld"><label for="vdT">Lisans türü</label><select id="vdT">${Object.entries(LIS_TUR).map(([k,l])=>`<option value="${k}" ${o.lisansTur===k?"selected":""}>${l}</option>`).join("")}</select></div><div class="fld"><label for="vdB">Bitiş tarihi</label><input type="date" id="vdB" value="${o.bitis?dayKey(o.bitis):""}" required></div></div>
+      <div class="row2"><div class="fld"><label for="vdM">Personel sınırı (0 = sınırsız)</label><input type="number" min="0" id="vdM" value="${o.maxPersonel||0}"></div><div class="fld"><label for="vdI">İletişim / not</label><input id="vdI" value="${esc(o.iletisim||"")}"></div></div><button class="btn go block">Kaydet</button></form>`, () => {
+      $("#vdf").onsubmit = async e => { e.preventDefault(); try { await FS.collection("oteller").doc(o.id).update({lisansTur:$("#vdT").value, bitis:new Date($("#vdB").value+"T23:59:00").getTime(), maxPersonel:+$("#vdM").value||0, iletisim:$("#vdI").value.trim()}); closeSheet(); toast("Kaydedildi."); } catch(er){ handleErr(er); } };
+    }); });
+  document.querySelectorAll("[data-vg]").forEach(b => b.onclick = () => gmPassSheet(otelList.find(x => x.id === b.dataset.vg)));
+}
+VIEWS.lisans = { title: "Lisans yönetimi", allow: () => isAdmin(), live: vendorHtml, bind: bindVendor };
+function renderVendor(){
+  closeSheet(); document.querySelectorAll(".fab,.composer,.bulkbar").forEach(n=>n.remove());
+  $("#top").innerHTML = `<div class="mark">${icon("star","#d9a426")}</div><h1>Lisans yönetimi</h1>${OTEL&&mode!=="vendor"?`<button class="hbtn" id="vnBack">Otele dön</button>`:""}<button class="hbtn" id="vnOut" aria-label="Çıkış">${icon("user")}</button>`;
+  $("#main").innerHTML = `<div class="list">${vendorHtml()}</div>`;
+  bindVendor();
+  $("#vnOut").onclick = () => firebase.auth().signOut();
+  if ($("#vnBack")) $("#vnBack").onclick = () => location.reload();
+}
+async function withSetup(otelId, fn){
+  await FS.collection("oteller").doc(otelId).update({kurulum:true});
+  try { return await fn(); } finally { try { await FS.collection("oteller").doc(otelId).update({kurulum:false}); } catch(e){} }
+}
+async function hotelAccess(otelId, st, pw, kullanici){
+  const H = c => FS.collection("oteller").doc(otelId).collection(c);
+  const email = "u" + uid8() + "@" + EMAIL_DOMAIN;
+  const sa = await secondaryAuth();
+  const cred = await sa.createUserWithEmailAndPassword(email, pw);
+  const uid = cred.user.uid; await sa.signOut();
+  await FS.collection("members").doc(uid).set({otel:otelId, staffId:st.id, rol:st.rol, dept:st.dept});
+  if (st.uid && st.uid !== uid){ try { await FS.collection("members").doc(st.uid).delete(); } catch(e){} }
+  await H("staff").doc(st.id).set({ad:st.ad, dept:st.dept, rol:st.rol, unvan:st.unvan||"", durum:"aktif", uid, authEmail:email, kullanici});
+  await H("staffTel").doc(st.id).set({tel:st.tel||"", sifre:pw});
+  await FS.collection("logins").doc(kullanici).set({email, staffId:st.id, otel:otelId});
+  if (telOk(st.tel||"")) await FS.collection("logins").doc(st.tel).set({email, staffId:st.id, otel:otelId});
+  await FS.collection("oteller").doc(otelId).update({gmStaffId:st.id, gmAd:st.ad, gmKullanici:kullanici, gmUid:uid, gmTel:st.tel||""});
+  return uid;
+}
+function newHotelSheet(){
+  const in30 = dayKey(Date.now() + 14*864e5);
+  sheet("Yeni otel ve lisans", `<form class="f" id="nhf">
+    <div class="fld"><label for="nhA">Otel adı *</label><input id="nhA" required placeholder="Otelin adını yaz"></div>
+    <div class="fld"><label for="nhD">Kullanıcı adı uzantısı</label><input id="nhD" autocapitalize="none" spellcheck="false" placeholder="oteladi.com" required></div>
+    <div class="row2"><div class="fld"><label for="nhT">Lisans türü</label><select id="nhT"><option value="demo">Demo (14 gün)</option><option value="aylik">Aylık</option><option value="yillik">Yıllık</option></select></div><div class="fld"><label for="nhB">Bitiş tarihi</label><input type="date" id="nhB" value="${in30}" required></div></div>
+    <div class="row2"><div class="fld"><label for="nhM">Personel sınırı (0 = sınırsız)</label><input type="number" min="0" id="nhM" value="0"></div><div class="fld"><label for="nhI">İletişim / not</label><input id="nhI" placeholder="Yetkili, telefon, fatura notu"></div></div>
+    <b>Otelin genel müdürü</b>
+    <div class="row2"><div class="fld"><label for="nhG">Ad soyad *</label><input id="nhG" required></div><div class="fld"><label for="nhP">Telefon</label><input id="nhP" type="tel" inputmode="tel" placeholder="05xx xxx xx xx"></div></div>
+    <div id="nhE"></div><button class="btn go block" id="nhGo">Oteli oluştur ve hesabı aç</button></form>`, () => {
+    $("#nhA").addEventListener("input", () => { $("#nhD").value = domainFromHotel($("#nhA").value); });
+    $("#nhT").onchange = () => { const d = {demo:14, aylik:30, yillik:365}[$("#nhT").value]; $("#nhB").value = dayKey(Date.now() + d*864e5); };
+    $("#nhf").onsubmit = async e => { e.preventDefault(); const err = m => $("#nhE").innerHTML = `<div class="banner">${esc(m)}</div>`;
+      const ad = $("#nhA").value.trim(), dom = trLower($("#nhD").value.trim().replace(/^@/,"")), tel = normTel($("#nhP").value), gm = $("#nhG").value.trim();
+      if (!/^[a-z0-9.-]+\.[a-z]{2,}$/.test(dom)) return err("Uzantı oteladi.com şeklinde olmalı.");
+      if ($("#nhP").value.trim() && !telOk(tel)) return err("Telefonu 05xx xxx xx xx şeklinde yaz.");
+      if (otelList.some(o => o.domain === dom)) return err("Bu uzantıyla bir otel zaten var.");
+      const b = $("#nhGo"); b.disabled = true; b.textContent = "Oluşturuluyor…";
+      try {
+        const id = (slugUser(ad).replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "otel") + "-" + uid8().slice(-4);
+        await FS.collection("oteller").doc(id).set({ad, domain:dom, lisansTur:$("#nhT").value, bitis:new Date($("#nhB").value+"T23:59:00").getTime(), durum:"aktif", maxPersonel:+$("#nhM").value||0, iletisim:$("#nhI").value.trim(), olusturma:Date.now(), kurulum:true});
+        const sid = "p" + uid8(), pw = genPw(), parts = slugUser(gm).split(".").filter(Boolean);
+        const kullanici = (parts.length > 1 ? parts[0] + "." + parts[parts.length-1] : (parts[0]||"genelmudur")) + "@" + dom;
+        const taken = await FS.collection("logins").doc(kullanici).get({source:"server"});
+        if (taken.exists) throw {code:"user-taken"};
+        await FS.collection("oteller").doc(id).collection("ayarlar").doc("genel").set({girisDomain:dom, otel:{ad}});
+        await hotelAccess(id, {id:sid, ad:gm, dept:"Yönetim", rol:"gm", unvan:"Genel Müdür", tel}, pw, kullanici);
+        await FS.collection("oteller").doc(id).update({kurulum:false});
+        credSheet({ad:gm, tel}, kullanici, pw);
+      } catch(er){ b.disabled = false; b.textContent = "Oteli oluştur ve hesabı aç"; err(er.code === "user-taken" ? "Bu kullanıcı adı başka bir otelde var; genel müdürün adını ya da uzantıyı değiştir." : authMsg(er)); }
+    };
+  });
+}
+function gmPassSheet(o){
+  sheet(`${esc(o.ad)} · genel müdür`, `<div class="card"><div>${esc(o.gmAd||"")}</div><div>Kullanıcı adı: <b>${esc(o.gmKullanici||"")}</b></div></div>
+    <div class="hint">Genel müdür şifresini unuttuysa yeni şifre ver. Otelin diğer verilerine erişmezsin.</div><button class="btn go block" id="gpGo">Yeni şifre oluştur</button>`, () => {
+    $("#gpGo").onclick = async () => { const b = $("#gpGo"); b.disabled = true; b.textContent = "Oluşturuluyor…"; const pw = genPw();
+      try { await withSetup(o.id, () => hotelAccess(o.id, {id:o.gmStaffId, ad:o.gmAd, dept:"Yönetim", rol:"gm", unvan:"Genel Müdür", tel:o.gmTel||"", uid:o.gmUid}, pw, o.gmKullanici)); credSheet({ad:o.gmAd, tel:o.gmTel||""}, o.gmKullanici, pw); }
+      catch(e){ b.disabled = false; b.textContent = "Yeni şifre oluştur"; handleErr(e); } };
+  });
+}
+
+/* ---------------- Eski tek otelli verinin taşınması (bir kez, uygulama sahibinin cihazında) ---------------- */
+const LEGACY_COLLS = ["ayarlar","staff","staffTel","tasks","reservations","gmsgs","chat","shifts","assets","energy","loyalty","rooms","guests","guestTel","sifreTalepleri","islemler","duyurular","sikayetler","kayipesya","devriyeler","devriyeKayit","yedekler","dosyalar","sohbetler"];
+const LEGACY_SUB = {yedekler:"parca", dosyalar:"parca", sohbetler:"mesajlar"};
+async function migrateLegacy(){
+  closeSheet();
+  $("#top").innerHTML = `<div class="mark">${icon("star","#d9a426")}</div><h1>${esc(APP_ADI)}</h1>`;
+  $("#main").innerHTML = `<div class="login list"><div class="card"><b style="font:600 17px var(--display)">Yeni lisans sistemine geçiliyor</b><div>Mevcut verilerin otelinin altına taşınıyor. Bu bir kez yapılır, birkaç dakika sürebilir. Uygulamayı kapatma.</div><div id="mgP" class="muted num">Başlıyor…</div></div></div>`;
+  const P = t => { const el = $("#mgP"); if (el) el.textContent = t; };
+  try {
+    let ay = {}; try { const a = await FS.collection("ayarlar").doc("genel").get(); ay = a.exists ? a.data() : {}; } catch(e){}
+    const ad = (ay.otel && ay.otel.ad) || "Crowne Plaza Florya";
+    const dom = ay.girisDomain || domainFromHotel(ad);
+    const id = slugUser(ad).replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "otel-1";
+    await FS.collection("oteller").doc(id).set({ad, domain:dom, lisansTur:"sahip", bitis: Date.now() + 50*365*864e5, durum:"aktif", olusturma:Date.now(), kurulum:true, gmStaffId:member.staffId||"", gmAd: "", gmKullanici:""}, {merge:true});
+    const H = c => FS.collection("oteller").doc(id).collection(c);
+    let total = 0;
+    const keys = new Set();
+    for (const c of LEGACY_COLLS){
+      let snap; try { snap = await FS.collection(c).get(); } catch(e){ continue; }
+      for (const d of snap.docs){
+        const data = d.data();
+        if (c === "staff"){ if (data.kullanici) keys.add(data.kullanici); if (data.tel) keys.add(data.tel); }
+        if (c === "staffTel" && data.tel) keys.add(data.tel);
+        await H(c).doc(d.id).set(data); total++;
+        if (LEGACY_SUB[c]){ const sub = await FS.collection(c).doc(d.id).collection(LEGACY_SUB[c]).get(); for (const x of sub.docs){ await H(c).doc(d.id).collection(LEGACY_SUB[c]).doc(x.id).set(x.data()); total++; } }
+        if (total % 10 === 0) P(`${total} kayıt taşındı (${c})…`);
+      }
+    }
+    P("Hesaplar otele bağlanıyor…");
+    if (!member) await FS.collection("members").doc(authUser.uid).set({otel:id, staffId:"", rol:"gm", dept:"Yönetim"});
+    const ms = await FS.collection("members").get();
+    for (const m of ms.docs) if (!m.data().otel) await FS.collection("members").doc(m.id).update(m.id === authUser.uid ? {otel:id, rol:"gm", dept:"Yönetim"} : {otel:id});
+    for (const k of keys){ try { const l = await FS.collection("logins").doc(k).get(); if (l.exists && !l.data().otel) await FS.collection("logins").doc(k).set({otel:id}, {merge:true}); } catch(e){} }
+    await FS.collection("oteller").doc(id).update({kurulum:false});
+    P(`Tamamlandı: ${total} kayıt taşındı. Uygulama yeniden açılıyor…`);
+    setTimeout(() => location.reload(), 1500);
+  } catch(e){ P("Taşıma sırasında hata oldu: " + ((e && (e.code || e.message)) || "") + ". İnterneti kontrol edip uygulamayı yeniden aç; kaldığı yerden tekrar dener."); }
+}
+
 /* ======================= YEDEKLER ======================= */
 const YEDEK_KOLL = ["staff","staffTel","tasks","rooms","guests","guestTel","reservations","gmsgs","assets","energy","loyalty","shifts","chat","duyurular","ayarlar"];
 const OTO_YEDEK_SAKLA = 30;
 let backupBusy = false;
 async function collectAll(){
   const out = {};
-  for (const c of YEDEK_KOLL){ const snap = await DB.collection(c).get(); out[c] = snap.docs.map(d => ({id:d.id, ...d.data()})); }
+  for (const c of YEDEK_KOLL){ const snap = await col(c).get(); out[c] = snap.docs.map(d => ({id:d.id, ...d.data()})); }
   return out;
 }
 async function createBackup(tur){
@@ -2050,20 +2218,20 @@ async function createBackup(tur){
       for (const d of list){ const j = JSON.stringify(d); if (size + j.length > 600000 && cur.length){ parts.push({c, json:"[" + cur.join(",") + "]"}); cur = []; size = 0; } cur.push(j); size += j.length + 1; }
       if (cur.length) parts.push({c, json:"[" + cur.join(",") + "]"});
     }
-    for (let i=0; i<parts.length; i++) await DB.collection("yedekler").doc(id).collection("parca").doc(String(i).padStart(4,"0")).set(parts[i]);
-    await DB.collection("yedekler").doc(id).set({zaman:Date.now(), tur, kim:meId||"", kimAd: me() ? me().ad : "Genel Müdür", sayilar, parca:parts.length});
+    for (let i=0; i<parts.length; i++) await col("yedekler").doc(id).collection("parca").doc(String(i).padStart(4,"0")).set(parts[i]);
+    await col("yedekler").doc(id).set({zaman:Date.now(), tur, kim:meId||"", kimAd: me() ? me().ad : "Genel Müdür", sayilar, parca:parts.length});
     return id;
   } finally { backupBusy = false; }
 }
 async function readBackup(b){
-  const snap = await DB.collection("yedekler").doc(b.id).collection("parca").get();
+  const snap = await col("yedekler").doc(b.id).collection("parca").get();
   const out = {}; snap.docs.sort((a,c)=>a.id.localeCompare(c.id)).forEach(d => { const p = d.data(); out[p.c] = (out[p.c]||[]).concat(JSON.parse(p.json)); });
   return out;
 }
 async function deleteBackup(b){
-  const snap = await DB.collection("yedekler").doc(b.id).collection("parca").get();
+  const snap = await col("yedekler").doc(b.id).collection("parca").get();
   for (const d of snap.docs) await d.ref.delete();
-  await DB.collection("yedekler").doc(b.id).delete();
+  await col("yedekler").doc(b.id).delete();
 }
 async function maybeAutoBackup(){
   if (backupChecked || !gmM() || mode === "demo") return; backupChecked = true;
@@ -2074,7 +2242,7 @@ async function maybeAutoBackup(){
     for (const b of old){ try { await deleteBackup(b); } catch(e){} }
   }
   cleanupFiles();
-  try { const cut = Date.now() - 90*864e5; const o = await DB.collection("islemler").where("zaman","<",cut).limit(200).get(); for (const d of o.docs) await d.ref.delete(); } catch(e){}
+  try { const cut = Date.now() - 90*864e5; const o = await col("islemler").where("zaman","<",cut).limit(200).get(); for (const d of o.docs) await d.ref.delete(); } catch(e){}
 }
 function fileName(ts){ const d = new Date(ts); return `HotelPlus-yedek-${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}.json`; }
 async function shareFile(name, text){
@@ -2113,7 +2281,7 @@ async function restoreBackup(b){
     let n = 0, total = Object.entries(data).filter(([c]) => c !== "chat").reduce((m,[,l]) => m + l.length, 0);
     for (const [c, list] of Object.entries(data)){
       if (c === "chat") continue;
-      for (const d of list){ const {id, ...rest} = d; if (PRIV[c]) delete rest.tel; await DB.collection(c).doc(id).set(rest); n++; if (n % 20 === 0 && $("#rsP")) $("#rsP").textContent = `${n} / ${total} kayıt`; }
+      for (const d of list){ const {id, ...rest} = d; if (PRIV[c]) delete rest.tel; await col(c).doc(id).set(rest); n++; if (n % 20 === 0 && $("#rsP")) $("#rsP").textContent = `${n} / ${total} kayıt`; }
     }
     logOp("geri yükledi", "yedekler", b.id, {ad: fmtD(b.zaman)});
     closeSheet(); toast(`${n} kayıt geri yüklendi.`);
@@ -2223,7 +2391,7 @@ function previewStaff(items){
       <div class="row2"><select data-i="${i}" data-k="dept" aria-label="Departman" ${high?"":"disabled"} style="padding:7px;border-radius:8px;border:1px solid var(--line);background:var(--surface)">${deptOptions(x.dept)}</select><select data-i="${i}" data-k="rol" aria-label="Rütbe" style="padding:7px;border-radius:8px;border:1px solid var(--line);background:var(--surface)">${rolOptions(x.rol, high)}</select></div></div>`).join("")).join("")
     + (fresh.length?`<button class="btn go block" id="iSave">${fresh.length} kişiyi ekle</button>`:"");
   $("#iOut").querySelectorAll("select[data-i]").forEach(s => s.onchange = () => { fresh[+s.dataset.i][s.dataset.k] = s.value; });
-  if ($("#iSave")) $("#iSave").onclick = async () => { const b=$("#iSave"); b.disabled=true;
+  if ($("#iSave")) $("#iSave").onclick = async () => { if (!staffRoom(fresh.length)) return; const b=$("#iSave"); b.disabled=true;
     for (let i=0;i<fresh.length;i++){ b.textContent=`Ekleniyor ${i+1}/${fresh.length}…`; const x = fresh[i]; await store.add("staff", {ad:x.ad, dept:x.dept, unvan:x.unvan, tel:x.tel, rol:x.rol, durum:"aktif"}); }
     closeSheet(); toast(`${fresh.length} personel eklendi. Giriş için her birine "Hesap aç" ile şifre ver.`); };
 }
